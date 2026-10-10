@@ -13,4 +13,3 @@ get w05.webp     hf_20261010_210844_60682f0f-2d61-4b0d-87df-d774a26f0a49_min.web
 get w06.webp     hf_20261010_210845_5f5bf753-374f-4aeb-8246-d1161c96b118_min.webp
 get splash.webp  hf_20261010_210843_a47d3d8c-6f06-4f6f-919f-a353fdb1501b_min.webp
 get logo.webp    hf_20261010_210845_76eff898-55c0-4c0b-9936-4e161dc71519_min.webp
-get victory.webp hf_20261010_210844_c4797ee9-b43f-4be0-b950-f399c7c54f90_min.webp
