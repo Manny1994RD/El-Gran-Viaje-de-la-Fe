@@ -1,10 +1,10 @@
 #!/bin/sh
 # Downloads the Higgsfield illustrations into public/art/ (title cards, splash, logo, victory).
-# Run from the project folder:  sh tools/fetch-art.sh
+# Run from the project folder:  sh tools/fetch-art.sh   (files already in public/art are kept)
 set -e
 BASE=https://d8j0ntlcm91z4.cloudfront.net/user_3DhQuVeAP6eEge58X1LDvrzHN3o
 mkdir -p public/art
-get() { curl -fsSL "$BASE/$2" -o "public/art/$1" && echo "ok  $1" || echo "FAILED  $1"; }
+get() { [ -f "public/art/$1" ] && { echo "have $1"; return; }; curl -fsSL "$BASE/$2" -o "public/art/$1" && echo "ok  $1" || echo "FAILED  $1"; }
 get w01.webp     hf_20261010_210845_92771471-43c9-4acd-884a-f68106977da0_min.webp
 get w02.webp     hf_20261010_210844_6f63ffc8-439c-4de3-9311-0efef879b084_min.webp
 get w03.webp     hf_20261010_210844_1bd8c562-e05c-407a-b722-2b5200b71c44_min.webp
