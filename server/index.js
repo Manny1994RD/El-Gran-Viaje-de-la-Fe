@@ -521,7 +521,7 @@ route('GET', '/api/admin/backup', ({ user }) => {
 // ---------- http plumbing ----------
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon' };
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon' };
 
 async function serveStatic(req, res, pathname) {
   let file = normalize(join(PUBLIC, decodeURIComponent(pathname)));
