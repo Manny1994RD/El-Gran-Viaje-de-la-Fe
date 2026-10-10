@@ -178,7 +178,7 @@ function handItem(kind, ac) {
     case 'book':
       return `<g transform="rotate(-12 ${x} ${y})"><rect x="${x - 12}" y="${y - 16}" width="26" height="32" rx="3" fill="${ac}" ${O2}/>`
         + `<rect x="${x + 10}" y="${y - 14}" width="4" height="28" fill="#FBF7EE"/>`
-        + `<path d="M${x - 4},${y - 4} L${x + 6},${y - 4} M${x + 1},${y - 9} L${x + 1},${y + 6}" stroke="#FFD84D" stroke-width="3" stroke-linecap="round"/></g>`;
+        + star(x + 1, y - 2, 6, '#FFD84D', O2) + `</g>`;
     case 'scroll':
       return `<rect x="${x - 8}" y="${y - 18}" width="18" height="36" rx="3" fill="#F3E3B5" ${O2}/>`
         + `<rect x="${x - 12}" y="${y - 22}" width="26" height="7" rx="3.5" fill="#D9B56C" ${O2}/><rect x="${x - 12}" y="${y + 15}" width="26" height="7" rx="3.5" fill="#D9B56C" ${O2}/>`

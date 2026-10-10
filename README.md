@@ -70,6 +70,12 @@ Download the new ZIP and replace the files, keeping your `.env`. Then in Contain
 ### Backups
 **Líder → Auditoría → 💾 Copia de seguridad** downloads a full copy of the database. Do this weekly and at the end of the season. To restore, stop the project, copy the file into the volume as `viaje.db`, and start it again.
 
+## Illustrations
+
+World title cards, the welcome splash, the logo and the victory scene were made with Higgsfield. They live in `public/art/` (`w01.webp` … `w06.webp`, `splash.webp`, `logo.webp`, `victory.webp`). If a file is missing, the game falls back to its drawn look.
+
+To download them, run `sh tools/fetch-art.sh` from the project folder on any computer with internet access, before building.
+
 ## How the rules work
 
 - **Points are provisional until a coordinator approves them.** Approving writes to a permanent points ledger. Mistakes are fixed with a reversing entry, never by editing or deleting.

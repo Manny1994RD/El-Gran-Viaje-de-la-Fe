@@ -18,6 +18,10 @@ const classById = (id) => S.classes.find((c) => c.id === id);
 const pct = (a, b) => (b <= 0 ? 100 : Math.max(0, Math.min(100, Math.round((a / b) * 100))));
 const localDate = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+// Illustrations live in public/art/. Each <img> removes itself if the file is missing,
+// so the game keeps its drawn look until the art is added.
+const art = (file, cls, alt = '') => `<img class="${cls}" src="art/${file}" alt="${esc(alt)}" loading="lazy" onerror="this.remove()">`;
+const worldArt = (w, cls = 'world-art') => art(w.id.toLowerCase() + '.webp', cls + (w.status === 'locked' ? ' locked' : ''), tr(w, 'name'));
 const CAT_ICON = { preaching: '📣', education: '📖', shepherd: '🐑', service: '🤲', unity: '🤝', card: '🃏' };
 
 class ApiError extends Error {
@@ -198,8 +202,8 @@ const HERO_LOOKS = [
 
 async function welcome() {
   app.innerHTML = `<section class="hero">
-    <div class="party">${HERO_LOOKS.map((h) => `<div>${avatarSVG(h.look, { classId: h.cls })}</div>`).join('')}</div>
-    <h1>${esc(t('app_name'))}</h1>
+    <div class="splash">${art('splash.webp', 'splash-art')}<div class="party">${HERO_LOOKS.map((h) => `<div>${avatarSVG(h.look, { classId: h.cls })}</div>`).join('')}</div></div>
+    <h1 class="${getLang() === 'es' ? 'has-logo' : ''}">${getLang() === 'es' ? art('logo.webp', 'logo-art', t('app_name')) : ''}<span>${esc(t('app_name'))}</span></h1>
     <div class="panel dialog-box"><p style="margin:0;font-weight:700">${t('tagline')}</p></div>
     <div class="btn-row" style="flex-direction:column">
       <a class="btn primary block" href="#/login">${t('login')}</a>
@@ -372,6 +376,7 @@ async function mapView() {
   } else if (active) {
     const w = active.world;
     head = `<div class="panel">
+      ${worldArt(w, 'world-art banner')}
       <div class="panel-title"><div><div class="hint" style="margin:0;font-weight:800">${t('current_world')} ${w.ord}/6</div><h2>${esc(tr(w, 'name'))}</h2></div>${worldStatusPill(w.status)}</div>
       ${w.star_target ? bar('⭐ ' + t('stars'), active.stars, w.star_target, 'gold') : ''}
       ${bar('🔑 ' + esc(tr(w, 'obstacle')), active.tag_count, w.tag_target)}
@@ -395,6 +400,7 @@ async function worldView({ args }) {
   let paths = '';
   if (p.paths) paths = `<ul class="req-list" style="margin-top:8px">${p.paths.map((x) => tick(x.done, t('paths.' + x.path))).join('')}</ul>`;
   app.innerHTML = `<div class="panel">
+      ${worldArt(w, 'world-art banner')}
       <div class="world-head"><div class="world-badge ${w.status}">${w.status === 'unlocked' ? '🔑' : w.status === 'locked' ? '🔒' : w.ord}</div>
         <div><h1 style="margin:0">${esc(tr(w, 'name'))}</h1>${worldStatusPill(w.status)}</div></div>
       <p class="story" style="margin-top:12px">${esc(tr(w, 'story'))}</p>
@@ -933,6 +939,7 @@ async function celebrate() {
   const [worlds, members] = await Promise.all([api('GET', '/worlds'), api('GET', '/members')]);
   const done = worlds.every((p) => p.world.status === 'unlocked');
   app.innerHTML = `<div class="panel victory">
+    ${done ? art('victory.webp', 'world-art banner', t('victory')) : worldArt(worlds[5].world, 'world-art banner')}
     <div style="font-size:2.4rem">${worlds.map((p) => (p.world.status === 'unlocked' ? '🔑' : '🔒')).join(' ')}</div>
     <h1>${done ? '🎉 ' + t('victory') : esc(tr(worlds[5].world, 'name'))}</h1>
     <p>${done ? t('victory_body') : esc(tr(worlds[5].world, 'story'))}</p>

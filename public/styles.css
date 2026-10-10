@@ -135,6 +135,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, .btn:focus-vi
 .hero .party > div { width: 33%; margin: 0 -4%; }
 .hero .party > div:nth-child(2) { transform: translateY(-10px) scale(1.12); z-index: 1; }
 
+/* illustrations (public/art); hidden automatically when a file is missing */
+.splash { position: relative; }
+.splash-art { display: block; width: 100%; border: 3px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 8px; }
+.splash-art + .party { display: none; }
+.hero h1.has-logo .logo-art { display: block; width: min(100%, 420px); margin: 0 auto; }
+.hero h1.has-logo .logo-art + span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.world-art { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border: 3px solid var(--line); border-radius: 14px; }
+.world-art.banner { margin-bottom: 12px; }
+.world-art.locked { filter: grayscale(.85) blur(1px); opacity: .75; }
+
 /* ---------- chips / tabs ---------- */
 .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
