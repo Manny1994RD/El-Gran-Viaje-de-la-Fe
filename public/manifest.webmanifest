@@ -1,0 +1,9 @@
+{
+  "name": "El Gran Viaje de la Fe",
+  "short_name": "Gran Viaje",
+  "start_url": "/#/map",
+  "display": "standalone",
+  "background_color": "#8FD16A",
+  "theme_color": "#3B7DD8",
+  "icons": [{ "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

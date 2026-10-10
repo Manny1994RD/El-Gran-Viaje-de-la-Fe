@@ -1,0 +1,27 @@
+# El Gran Viaje de la Fe: game server + Cloudflare Tunnel (access from anywhere, no open router ports).
+# Put your values in a file named .env next to this one (copy .env.example).
+services:
+  viaje:
+    build: .
+    container_name: viaje
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"          # http://<NAS-IP>:8080 on your home network
+    environment:
+      - SETUP_CODE=${SETUP_CODE:-}     # one-time code to create the admin account
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - viaje-data:/data              # the database lives here; survives updates
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: viaje-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - viaje
+
+volumes:
+  viaje-data:
