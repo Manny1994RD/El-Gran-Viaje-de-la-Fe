@@ -1,7 +1,6 @@
 // Game rules: claims, approvals, points ledger, world counters and unlocks.
 // Everything that changes points runs inside one IMMEDIATE transaction, so
 // double submits and simultaneous approvals cannot count twice.
-import { randomBytes } from 'node:crypto';
 import { getSettings, tx, audit } from './db.js';
 import { levelFor, LEVELS, pathsOf } from './catalog.js';
 import { challengeStatus } from './challenge.js';
@@ -40,75 +39,13 @@ export function activeWorld(db) {
   return db.prepare("SELECT * FROM worlds WHERE status = 'active' ORDER BY ord LIMIT 1").get();
 }
 
-function classOf(db, userId) {
-  return db.prepare('SELECT c.* FROM characters ch JOIN classes c ON c.id = ch.class_id WHERE ch.user_id = ?').get(userId);
-}
-
-export function abilityMatches(cls, def) {
-  if (!cls) return false;
-  if (cls.category) return def.category === cls.category && def.tags.includes(cls.tag);
-  return def.tags.includes(cls.tag);
-}
-
-function abilityUsedThisWeek(db, userId, week, exceptClaimId = 0) {
-  return !!db.prepare(`SELECT 1 FROM claims WHERE user_id = ? AND use_ability = 1 AND id != ?
-      AND status IN ('pending','approved','needs_changes') AND performed_at >= ? AND performed_at < date(?, '+7 days')`)
-    .get(userId, exceptClaimId, week, week);
-}
-
-// ---------- anonymous contacts (fruit milestones, no guest data) ----------
-
-export function createContact(db, userId) {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  for (let i = 0; i < 10; i++) {
-    const bytes = randomBytes(5);
-    const token = 'F-' + [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
-    try {
-      db.prepare('INSERT INTO anonymous_contacts (token, created_by) VALUES (?, ?)').run(token, userId);
-      return db.prepare('SELECT * FROM anonymous_contacts WHERE token = ?').get(token);
-    } catch { /* collision, retry */ }
-  }
-  fail('contact_failed', null, 500);
-}
-
-export function contactState(db, contactId) {
-  const rows = db.prepare(`SELECT def_id, status FROM claims WHERE contact_id = ? AND status IN ('pending','approved','needs_changes')`).all(contactId);
-  const has = (def, st) => rows.some((r) => r.def_id === def && (!st || st.includes(r.status)));
-  return {
-    baptism: has('PRE04', ['approved']) ? 'approved' : has('PRE04') ? 'pending' : 'none',
-    keeping: has('PRE05', ['approved']) ? 'approved' : has('PRE05') ? 'pending' : 'none',
-    meaningful: rows.filter((r) => r.def_id === 'PRE02' && r.status === 'approved').length,
-  };
-}
-
-export function listContacts(db, userId) {
-  return db.prepare('SELECT * FROM anonymous_contacts WHERE created_by = ? ORDER BY id DESC').all(userId)
-    .map((c) => ({ id: c.id, token: c.token, created_at: c.created_at, ...contactState(db, c.id) }));
-}
-
-function checkContact(db, def, contactId, userIds, claimId = 0) {
-  if (def.contact === 'none') return null;
-  if (!contactId) {
-    if (def.contact === 'pre02') return null;
-    fail('contact_required');
-  }
-  const c = db.prepare('SELECT * FROM anonymous_contacts WHERE id = ?').get(contactId);
-  if (!c || !userIds.includes(c.created_by)) fail('contact_not_found');
-  const active = (d) => db.prepare(`SELECT status FROM claims WHERE contact_id = ? AND def_id = ? AND id != ?
-      AND status IN ('pending','approved','needs_changes')`).all(contactId, d, claimId);
-  if (def.contact === 'pre04' && active('PRE04').length) fail('milestone_duplicate');
-  if (def.contact === 'pre05') {
-    if (!active('PRE04').some((r) => r.status === 'approved')) fail('keeping_needs_baptism');
-    if (active('PRE05').length) fail('milestone_duplicate');
-  }
-  return c.id;
-}
-
 // ---------- claims ----------
+// Daily activities count right away. Missions marked needs_approval (fruit, signatures,
+// EduLMS) wait for a coordinator. Points = stars: each participant gets them, and the
+// world receives them once per report.
 
 function validateClaimInput(db, user, def, input, claimId = 0) {
   if (!def || !def.active) fail('mission_inactive');
-  if (def.kind === 'card' && !def.revealed_at) fail('card_hidden');
   const settings = getSettings(db);
   if (settings.season_frozen) fail('season_frozen');
 
@@ -131,25 +68,12 @@ function validateClaimInput(db, user, def, input, claimId = 0) {
   }
   if (ids.length + 1 < def.min_participants) fail('min_participants', { min: def.min_participants });
 
-  if (def.kind === 'card') {
-    const done = db.prepare(`SELECT 1 FROM claims WHERE def_id = ? AND id != ? AND status IN ('pending','approved','needs_changes')
-        AND (user_id = ? OR id IN (SELECT claim_id FROM claim_participants WHERE user_id = ?))`).get(def.id, claimId, user.id, user.id);
-    if (done) fail('card_done');
-  }
-
-  let useAbility = input.use_ability ? 1 : 0;
-  if (useAbility) {
-    if (ids.length < 1) fail('ability_needs_team');
-    if (!abilityMatches(classOf(db, user.id), def)) fail('ability_no_match');
-    if (abilityUsedThisWeek(db, user.id, weekOf(performed), claimId)) fail('ability_cooldown');
-  }
-  const contactId = checkContact(db, def, input.contact_id ? Number(input.contact_id) : null, [user.id, ...ids], claimId);
   if (def.daily_cap != null) {
     const used = db.prepare(`SELECT COALESCE(SUM(quantity),0) n FROM claims WHERE user_id = ? AND def_id = ? AND performed_at = ? AND id != ?
         AND status IN ('pending','approved','needs_changes')`).get(user.id, def.id, performed, claimId).n;
     if (used + quantity > def.daily_cap) fail('daily_cap', { cap: def.daily_cap });
   }
-  return { quantity, performed, note, ids, useAbility, contactId, settings };
+  return { quantity, performed, note, ids, settings };
 }
 
 export function createClaim(db, user, input) {
@@ -167,15 +91,13 @@ export function createClaim(db, user, input) {
     const v = validateClaimInput(db, user, def, input);
     const ruleVersion = Number(v.settings.rule_version || 1);
     const r = db.prepare(`INSERT INTO claims (user_id, def_id, world_id, quantity, points_per_unit, rule_version, status, performed_at,
-        note, contact_id, use_ability, idempotency_key) VALUES (?,?,?,?,?,?, 'pending', ?,?,?,?,?)`)
-      .run(user.id, def.id, world.id, v.quantity, def.points, ruleVersion, v.performed, v.note || null, v.contactId, v.useAbility, key);
+        note, idempotency_key) VALUES (?,?,?,?,?,?, 'pending', ?,?,?)`)
+      .run(user.id, def.id, world.id, v.quantity, def.points, ruleVersion, v.performed, v.note || null, key);
     const claimId = Number(r.lastInsertRowid);
     const ins = db.prepare('INSERT INTO claim_participants (claim_id, user_id) VALUES (?, ?)');
     for (const pid of v.ids) ins.run(claimId, pid);
     db.prepare("INSERT INTO approval_events (claim_id, actor_id, action) VALUES (?, ?, 'submitted')").run(claimId, user.id);
-
-    const auto = v.settings.self_report_review === 'auto' && ['shepherd', 'service'].includes(def.category) && v.ids.length === 0;
-    if (auto) approveInside(db, { id: 0 }, claimId, 'auto');
+    if (!def.needs_approval) approveInside(db, { id: 0 }, claimId, 'auto');
     return { claim: db.prepare('SELECT * FROM claims WHERE id = ?').get(claimId), duplicate: false };
   });
 }
@@ -186,10 +108,10 @@ export function resubmitClaim(db, user, claimId, input) {
     if (!c || c.user_id !== user.id) fail('not_found', null, 404);
     if (c.status !== 'needs_changes') fail('bad_state');
     const def = getDef(db, c.def_id);
-    const v = validateClaimInput(db, user, { ...def, active: 1, revealed_at: def.revealed_at || 'x' }, input, claimId);
+    const v = validateClaimInput(db, user, { ...def, active: 1 }, input, claimId);
     const before = { ...c };
-    db.prepare(`UPDATE claims SET quantity = ?, performed_at = ?, note = ?, contact_id = ?, use_ability = ?, status = 'pending',
-        updated_at = datetime('now') WHERE id = ?`).run(v.quantity, v.performed, v.note || null, v.contactId, v.useAbility, claimId);
+    db.prepare(`UPDATE claims SET quantity = ?, performed_at = ?, note = ?, status = 'pending', updated_at = datetime('now') WHERE id = ?`)
+      .run(v.quantity, v.performed, v.note || null, claimId);
     db.prepare('DELETE FROM claim_participants WHERE claim_id = ?').run(claimId);
     const ins = db.prepare('INSERT INTO claim_participants (claim_id, user_id) VALUES (?, ?)');
     for (const pid of v.ids) ins.run(claimId, pid);
@@ -204,74 +126,27 @@ export function participantsOf(db, claim) {
   return [claim.user_id, ...others.filter((id) => id !== claim.user_id)];
 }
 
-function weeklySum(db, userId, week, kinds) {
-  const ph = kinds.map(() => '?').join(',');
-  return db.prepare(`SELECT COALESCE(SUM(amount),0) n FROM ledger WHERE user_id = ? AND scope = 'xp' AND week = ? AND kind IN (${ph})`)
-    .get(userId, week, ...kinds).n;
-}
-
-const BASE_KINDS = ['base', 'offset_base'];
-const BONUS_KINDS = ['ability', 'card', 'offset_ability', 'offset_card'];
-
 function approveInside(db, actor, claimId, reason) {
   const c = db.prepare('SELECT * FROM claims WHERE id = ?').get(claimId);
   if (!c) fail('not_found', null, 404);
   if (c.status === 'approved') return { claim: c, already: true };
   if (c.status !== 'pending') fail('bad_state');
-  const def = getDef(db, c.def_id);
-  const settings = getSettings(db);
   const people = participantsOf(db, c);
-  // Re-check milestone order at approval time: two pending PRE04 for one contact must not both pass.
-  if (def.contact === 'pre04' || def.contact === 'pre05') checkContactAtApproval(db, def, c);
-
   const week = weekOf(c.performed_at);
   const full = c.points_per_unit * c.quantity;
   const ins = db.prepare(`INSERT INTO ledger (user_id, claim_id, world_id, amount, scope, kind, week, rule_version, note)
       VALUES (?,?,?,?,?,?,?,?,?)`);
-  const result = { stars: 0, members: {} };
-  const give = (uid, amount, kind, capKinds, cap) => {
-    let award = amount;
-    let capped = false;
-    if (cap != null) {
-      const room = Math.max(0, cap - weeklySum(db, uid, week, capKinds));
-      if (award > room) { award = room; capped = true; }
-    }
-    const m = (result.members[uid] ??= { xp: 0, notes: [] });
-    m.xp += award;
-    if (capped) m.notes.push(kind === 'base' ? 'weekly_base_cap' : 'weekly_bonus_cap');
-    if (award > 0) ins.run(uid, c.id, c.world_id, award, 'xp', kind, week, c.rule_version, null);
-  };
-
-  if (def.kind === 'card') {
-    const scope = def.reward_scope || 'bonus';
-    if (scope === 'bonus') give(c.user_id, full, 'card', BONUS_KINDS, settings.max_personal_bonus_weekly);
-    if (scope === 'each_member') for (const uid of people) give(uid, full, 'card', BONUS_KINDS, settings.max_personal_bonus_weekly);
-  } else if (def.exempt_cap) {
-    for (const uid of people) give(uid, full, 'milestone', null, null);
-  } else {
-    for (const uid of people) give(uid, full, 'base', BASE_KINDS, settings.max_personal_base_weekly);
+  const result = { stars: full, members: {} };
+  for (const uid of people) {
+    result.members[uid] = { xp: full, notes: [] };
+    if (full > 0) ins.run(uid, c.id, c.world_id, full, 'xp', 'base', week, c.rule_version, null);
   }
-  if (c.use_ability && people.length >= 2) {
-    const cls = classOf(db, c.user_id);
-    if (abilityMatches(cls, def)) {
-      for (const uid of people) give(uid, Number(settings.class_ability_bonus || 5), 'ability', BONUS_KINDS, settings.max_personal_bonus_weekly);
-    }
-  }
-  // Group stars: the event counts once for the world, never capped.
+  // The world receives the stars once per report, however many took part.
   ins.run(null, c.id, c.world_id, full, 'world', 'stars', week, c.rule_version, null);
-  result.stars = full;
-
   db.prepare(`UPDATE claims SET status = 'approved', coord_message = NULL, result_json = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(JSON.stringify(result), c.id);
   db.prepare("INSERT INTO approval_events (claim_id, actor_id, action, reason) VALUES (?, ?, 'approved', ?)").run(c.id, actor.id, reason || null);
   return { claim: db.prepare('SELECT * FROM claims WHERE id = ?').get(c.id), result };
-}
-
-function checkContactAtApproval(db, def, c) {
-  const approved = (d) => db.prepare(`SELECT 1 FROM claims WHERE contact_id = ? AND def_id = ? AND status = 'approved' AND id != ?`).get(c.contact_id, d, c.id);
-  if (!c.contact_id) fail('contact_required');
-  if (approved(def.id)) fail('milestone_duplicate');
-  if (def.contact === 'pre05' && !approved('PRE04')) fail('keeping_needs_baptism');
 }
 
 export function approveClaim(db, actor, claimId, reason) {
@@ -407,20 +282,28 @@ export function unlockWorld(db, actor, worldId) {
 
 export function userStats(db, userId) {
   const xp = db.prepare("SELECT COALESCE(SUM(amount),0) n FROM ledger WHERE scope = 'xp' AND user_id = ?").get(userId).n;
-  const pendingRows = db.prepare(`SELECT c.points_per_unit * c.quantity n FROM claims c JOIN mission_defs d ON d.id = c.def_id
-      WHERE c.status = 'pending' AND d.kind != 'card' AND (c.user_id = ? OR c.id IN (SELECT claim_id FROM claim_participants WHERE user_id = ?))`).all(userId, userId);
+  const pendingRows = db.prepare(`SELECT c.points_per_unit * c.quantity n FROM claims c
+      WHERE c.status = 'pending' AND (c.user_id = ? OR c.id IN (SELECT claim_id FROM claim_participants WHERE user_id = ?))`).all(userId, userId);
   const lvl = levelFor(xp);
   const next = LEVELS.find((l) => l.level === lvl.level + 1) || null;
-  const week = weekOf(today());
+  const todayStars = db.prepare(`SELECT COALESCE(SUM(l.amount),0) n FROM ledger l JOIN claims c ON c.id = l.claim_id
+      WHERE l.scope = 'xp' AND l.user_id = ? AND c.performed_at = ?`).get(userId, today()).n;
   const byCat = db.prepare(`SELECT d.category, COUNT(*) n FROM claims c JOIN mission_defs d ON d.id = c.def_id
       WHERE c.status = 'approved' AND (c.user_id = ? OR c.id IN (SELECT claim_id FROM claim_participants WHERE user_id = ?)) GROUP BY d.category`).all(userId, userId);
   return {
     xp, pending_xp: pendingRows.reduce((a, r) => a + r.n, 0), level: lvl.level, next_level_xp: next?.min_xp ?? null, level_min_xp: lvl.min_xp,
-    week, week_base: weeklySum(db, userId, week, BASE_KINDS), week_bonus: weeklySum(db, userId, week, BONUS_KINDS),
-    ability_used: abilityUsedThisWeek(db, userId, week),
+    today_stars: todayStars,
     unlocked_cosmetics: LEVELS.filter((l) => xp >= l.min_xp).map((l) => l.cosmetic),
     contributions: Object.fromEntries(byCat.map((r) => [r.category, r.n])),
   };
+}
+
+// Recent group activity for the home screen (aliases and missions only).
+export function groupFeed(db, limit = 12) {
+  return db.prepare(`SELECT c.id, c.user_id, u.alias, c.def_id, d.name_es, d.name_en, d.category, c.quantity, c.points_per_unit, c.performed_at, c.updated_at,
+      (SELECT COUNT(*) FROM claim_participants p WHERE p.claim_id = c.id) others
+      FROM claims c JOIN users u ON u.id = c.user_id JOIN mission_defs d ON d.id = c.def_id
+      WHERE c.status = 'approved' ORDER BY c.updated_at DESC, c.id DESC LIMIT ?`).all(limit);
 }
 
 export function groupStats(db) {

@@ -33,6 +33,8 @@ function scenery(worlds, prog) {
     const p = prog[id];
     if (!p) return 0;
     if (p.world.status === 'unlocked') return 1;
+    const ch = p.challenge;
+    if (ch) return ch.type === 'pair' ? (ch.members ? ch.done / ch.members : 0) : Math.min(1, ch.count / (ch.target || 1));
     return p.world.tag_target ? Math.min(1, p.tag_count / p.world.tag_target) : 0;
   };
   let s = '';
@@ -162,6 +164,7 @@ export function mapSVG(progressList, party = [], lang = 'es') {
   if (active && party.length) {
     const { x, y } = NODES[active.id];
     const shown = party.slice(0, 7);
+    s += '<g class="party">';
     shown.forEach((p, i) => {
       if (i === 0) return;
       const side = i % 2 ? -1 : 1;
@@ -173,6 +176,7 @@ export function mapSVG(progressList, party = [], lang = 'es') {
     const me = shown[0];
     s += avatarSVG({ ...me.look, show: { ...me.look.show, frame: false, aura: false } }, { classId: me.class_id, size: 64, frame: false })
       .replace('<svg ', `<svg x="${x - 32}" y="${y - 104}" class="map-me" `);
+    s += '</g>';
   }
   return s + '</svg>';
 }

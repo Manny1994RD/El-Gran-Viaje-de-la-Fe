@@ -8,23 +8,20 @@ Works on phones and on a big screen (projector mode). Spanish by default, with a
 
 ## What's inside
 
-**For members**
-- **Character creator.** Choose from 5 classes, each with its own outfit and team ability, then 2 figures, 8 skin tones, 10 hairstyles, 10 hair colors, 5 eye styles, 6 eye colors, 4 smiles, 12 main and 12 accent colors, pants or a long skirt, 7 head items (including a veil), 4 back items, 6 hand items and 4 companions (lamb, dove, lion cub, owl). There is also a "Surprise me" button.
-- **Level rewards.** A badge, a glowing frame, an aura, a title and a unity crown appear on your character as you level up. You can hide them.
-- **World map.** Six worlds along one road. Each obstacle visibly changes as the group works on it: the fog lifts, crystals light up, the bridge gets its planks, the wind calms, the garden blooms and the city turns gold. Your character and your companions stand at the current world.
-- **Missions.** All 26 base missions and 12 special missions from the blueprint, with icons and filters. Reporting takes a few taps: how many, when, who was with you, and an optional note. Missions that help the current obstacle are marked 🔑.
-- **My character.** Level, XP, weekly caps, contributions, level rewards and report history. Reports a coordinator sends back can be corrected and sent again.
-- **Mystery cards and news.**
+**For members** (bottom bar: Hoy · Mapa · ＋ · Personaje)
+- **Hoy (home):** the current world's illustration with your character, a big **＋ Registrar actividad** button, your stars, the group's progress, your pair, coordinator notices, and the group's recent activity.
+- **＋ Registrar:** four big buttons (Predicar, Estudiar, Apacentar, Servir), 13 activities in total. Daily activities count right away with a star burst. Baptisms, keeping service, signatures and EduLMS wait for a coordinator.
+- **Stars are the only points.** They fill your level and the world's goal at the same time.
+- **Celebrations:** a level-up screen with your character's new reward, and a "new world" screen when the group opens a world, after which the group walks along the map to it. Sounds can be turned off in Personaje.
+- **Character creator:** 5 outfit styles, figure, skin, hair, eyes, smile, colors, hats and veil, back and hand items, companions, and level rewards (badge, glowing frame, aura, title, crown).
+- **Pair challenge board** for each world (see below).
 
-**For coordinators** (the **Líder** tab)
-- An approval queue with Approve / Send back / Reject, with a warning when someone sent the same report twice on one day.
-- A dashboard with the current world's progress, group statistics (no individual ranking), news posts and invitations.
-- Confirming a world unlock once every requirement is met.
+**For coordinators** (Líder tab)
+- **Aprobar:** approve, send back or reject milestone reports, and remove a mistaken entry from the recent list.
+- **Grupo:** the world's progress, group statistics, notices, invitations, and (for admins) members.
+- **Ajustes** (admins): worlds and challenges, missions (stars, daily limit, approval, on/off), rules, manual adjustments, CSV exports, backup and audit.
 
-**For administrators**
-- Rules and season settings, mission points and daily caps, world targets, revealing cards, managing members (roles, disable, reset PIN), corrections (void a report or adjust points with a reason), a full audit log, CSV exports and a one-tap database backup.
-
-**Projector mode:** Líder → Panel → "Open board for projector". It shows the map, current progress and every member's character, and refreshes every 30 seconds.
+**Projector mode:** Líder → Grupo → "Open board for projector".
 
 ## Install on your NAS
 
@@ -96,27 +93,14 @@ Each world opens when the group reaches its **star goal** and finishes its **cha
 
 ## How the rules work
 
-- **Points are provisional until a coordinator approves them.** Approving writes to a permanent points ledger. Mistakes are fixed with a reversing entry, never by editing or deleting.
-- **Team missions:** every participant gets their points, but the event counts **once** toward the world's obstacle and stars.
-- **World stars are never capped.** The weekly cap (60 mission XP + 20 bonus XP) applies to personal XP only. Fruit milestones (baptism +50, keeps worship +100) are exempt from the cap.
-- **Unlocking a world** needs: the star target, the obstacle target, the minimum number of different people, and the previous world completed. Then a coordinator confirms. The suggested dates are only a guide, and a world stays open until it is completed.
-- **Class abilities:** once a week, +5 to each participant of a joint mission that matches your class.
-- **Privacy:** guests are tracked only by anonymous codes (`F-XXXXX`). Notes with phone numbers or emails are refused. There is no individual ranking.
+- **Stars:** each activity gives its stars to everyone who took part, and once to the world.
+- **Instant vs. approved:** daily activities count right away. Fruit (baptism, keeping service), sermon and GA signatures, and EduLMS courses wait for a coordinator. Admins can change which missions need approval in Ajustes → Misiones.
+- **Mistakes:** a coordinator can remove an entry; its stars are taken back and the history is kept.
+- **Unlocking a world** needs the star goal, the challenge, and the previous world completed. Then a coordinator confirms. Suggested dates are only a guide.
+- **Privacy:** notes with phone numbers or emails are refused. There is no individual ranking.
 - **Rule changes only affect future reports.** Every change is versioned and logged.
 
-### Values still to confirm (from the blueprint's "Decisiones" sheet)
-These are set to the blueprint's proposed values. An admin can change them in **Líder → Reglas / Misiones / Mundos**:
-
-| Decision | Current value |
-|---|---|
-| Education points | EduLMS course 15, sermon signature 5, AGE/GA signature 8 |
-| Feeding points | 5 per activity, 1 per day |
-| Service points | 3 / 5 / 10 / 15 per the catalog, 1 per day |
-| Weekly cap | 60 mission XP + 20 bonus XP (fruit milestones exempt) |
-| World targets | 100 / 200 / 300 / 400 / 500 stars plus each world's obstacle |
-| Review of individual Feeding/Service reports | Needs approval. It can be switched to auto-approve. |
-
-PRE04 and PRE05 have no daily cap. They are limited to once per anonymous guest code instead, so two real baptisms on the same day are never lost.
+Earlier blueprint features (class abilities, weekly caps, mystery cards, special missions, anonymous guest codes) were removed to keep the game simple. The old missions stay in the database, switched off, and an admin can turn any of them back on in Ajustes → Misiones.
 
 ## For developers
 

@@ -1,6 +1,7 @@
 import { t, tr, getLang, setLang } from './i18n.js';
 import { avatarSVG, companionSVG } from './avatar.js';
-import { mapSVG } from './map.js';
+import { mapSVG, NODES } from './map.js';
+import { play, isMuted, setMuted } from './sound.js';
 import { LOOK_OPTIONS, SKIN, HAIR_COLORS, EYE_COLORS, OUTFIT_COLORS, DEFAULT_LOOK, COSMETICS, randomLook } from './options.js';
 
 const S = { me: null, character: null, settings: {}, classes: [], levels: [] };
@@ -114,6 +115,7 @@ const fmtDate = (d) => {
 
 // ---------- icons for nav ----------
 const ICONS = {
+  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg>',
   missions: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
   me: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="8" r="4.5"/><path d="M4 21c1-4.5 4.2-6.5 8-6.5s7 2 8 6.5"/></svg>',
@@ -130,9 +132,11 @@ function renderNav(active) {
   $('#lang-btn').textContent = getLang() === 'es' ? 'EN' : 'ES';
   $('#brand-name').textContent = S.settings.season_name && getLang() === 'es' ? S.settings.season_name : t('app_name');
   if (!show) return;
-  const items = [['map', t('nav_map')], ['missions', t('nav_missions')], ['me', t('nav_me')], ['news', t('nav_news')]];
+  const items = [['home', t('nav_home')], ['map', t('nav_map')], ['log', ''], ['me', t('nav_me')]];
   if (isCoord()) items.push(['lead', t('nav_lead')]);
-  nav.innerHTML = items.map(([k, label]) => `<a href="#/${k}" class="${active === k ? 'on' : ''}">${ICONS[k]}<span>${label}</span>${k === 'lead' && pendingCount ? `<b class="dot">${pendingCount}</b>` : ''}</a>`).join('');
+  nav.innerHTML = items.map(([k, label]) => (k === 'log'
+    ? `<a href="#/log" class="nav-plus ${active === 'log' ? 'on' : ''}" aria-label="${t('log_activity')}"><span>＋</span></a>`
+    : `<a href="#/${k}" class="${active === k ? 'on' : ''}">${ICONS[k]}<span>${label}</span>${k === 'lead' && pendingCount ? `<b class="dot">${pendingCount}</b>` : ''}</a>`)).join('');
 }
 async function refreshPending() {
   if (!isCoord()) return;
@@ -146,7 +150,8 @@ async function refreshPending() {
 // ---------- routing ----------
 const routes = {
   '': welcome, welcome, login, join, create: () => creator(false), edit: () => creator(true),
-  map: mapView, world: worldView, challenge: challengeView, gender: genderView, missions, report, fix: report, me: meView, news, lead, celebrate, tv,
+  home: homeView, map: mapView, world: worldView, challenge: challengeView, gender: genderView, log: logView, missions: logView,
+  report, fix: report, me: meView, news: homeView, lead, celebrate, tv,
 };
 const PUBLIC = new Set(['', 'welcome', 'login', 'join']);
 
@@ -168,14 +173,18 @@ async function router() {
   }
   if (S.me && !S.me.gender && name !== 'gender') return go('gender');
   if (S.me && !S.character && !['create', 'join', 'gender'].includes(name)) return go('create');
-  if (S.me && S.character && PUBLIC.has(name)) return go('map');
-  const view = routes[name] || mapView;
-  renderNav(name === 'world' || name === 'challenge' ? 'map' : name === 'report' || name === 'fix' ? 'missions' : name);
+  if (S.me && S.character && PUBLIC.has(name)) return go('home');
+  const view = routes[name] || homeView;
+  renderNav(name === 'world' || name === 'challenge' ? 'map' : ['report', 'fix', 'missions'].includes(name) ? 'log' : routes[name] ? name : 'home');
+  app.onclick = null;
   app.classList.toggle('wide', name === 'lead');
   window.scrollTo(0, 0);
   app.innerHTML = `<div class="loading">${t('loading')}</div>`;
   try {
     await view({ args, query, name });
+    app.classList.remove('view-in');
+    void app.offsetWidth;
+    app.classList.add('view-in');
   } catch (e) {
     if (e.code === 'unauthorized') return go('welcome');
     app.innerHTML = `<div class="panel"><div class="error-msg">${esc(errText(e))}</div><button class="btn" onclick="location.reload()">↻</button></div>`;
@@ -229,7 +238,7 @@ async function login() {
       if (r.me.lang && r.me.lang !== getLang()) setLang(r.me.lang);
       await loadBootstrap();
       toast(t('welcome_back'));
-      go(S.character ? 'map' : 'create');
+      go(S.character ? 'home' : 'create');
     } catch (err) {
       $('#err').innerHTML = `<div class="error-msg">${esc(errText(err))}</div>`;
     }
@@ -237,7 +246,7 @@ async function login() {
 }
 
 async function join({ query }) {
-  if (S.me) return go('map');
+  if (S.me) return go('home');
   app.innerHTML = `<div class="panel"><h2>${t('join')}</h2><div id="err"></div>
     <form id="f" autocomplete="off">
       <label class="field"><span>${t('code')}</span><input type="text" name="code" required value="${esc(query.get('code') || '')}" style="text-transform:uppercase;letter-spacing:.15em;font-weight:800" maxlength="20"></label>
@@ -324,7 +333,7 @@ async function creator(edit) {
       if (field === 'class') {
         h += `<div class="class-cards">${S.classes.map((c) => `<button class="class-card ${c.id === st.classId ? 'on' : ''}" data-class="${c.id}">
           ${avatarSVG({ ...st.look, show: {} }, { classId: c.id, crop: 'full', companion: false })}
-          <div><b>${esc(tr(c, 'name'))}</b><small>${esc(tr(c, 'style'))}</small><small>✨ ${esc(tr(c, 'ability'))}</small></div></button>`).join('')}</div>`;
+          <div><b>${esc(tr(c, 'name'))}</b><small>${esc(tr(c, 'style'))}</small></div></button>`).join('')}</div>`;
       } else if (field === 'rewards') {
         h += `<p class="hint">${t('rewards_hint')}</p>` + S.levels.filter((l) => COSMETICS.includes(l.cosmetic)).map((l) => {
           const got = unlocked.includes(l.cosmetic);
@@ -359,7 +368,7 @@ async function creator(edit) {
       S.character = await api(edit ? 'PUT' : 'POST', '/characters', body);
       toast(t('saved'));
       if (!edit) confetti();
-      go(edit ? 'me' : 'map');
+      go(edit ? 'me' : 'home');
     } catch (err) { toast(errText(err), true); }
   };
   drawStage(); drawOpts();
@@ -387,15 +396,34 @@ async function mapView() {
       ${active.eligible ? `<p style="margin-top:12px;font-weight:800;color:var(--green-d)">✨ ${t('eligible')}</p>` : ''}
       <div class="btn-row" style="margin-top:14px">${active.challenge
         ? `<a class="btn gold" href="#/challenge/${w.id}">🎯 ${t('see_challenge')}</a>`
-        : `<a class="btn" href="#/world/${w.id}">ℹ️ ${esc(tr(w, 'obstacle'))}</a>`}<a class="btn primary" href="#/missions">${t('see_missions')}</a></div>
+        : `<a class="btn" href="#/world/${w.id}">ℹ️ ${esc(tr(w, 'obstacle'))}</a>`}<a class="btn primary" href="#/log">＋ ${t('log_activity')}</a></div>
     </div>`;
   }
   const keys = worlds.map((p) => `<div class="key-slot ${p.world.status === 'unlocked' ? 'got' : ''}" title="${esc(tr(p.world, 'key'))}">${p.world.status === 'unlocked' ? '🔑' : ''}</div>`).join('');
   app.innerHTML = head
     + `<div class="map-wrap" id="map">${mapSVG(worlds, party, getLang())}</div>`
     + `<div class="panel tight"><div class="panel-title"><h3>${t('keys')}</h3></div><div class="keys">${keys}</div></div>`;
+  walkParty(active?.world.id);
   $('#map').addEventListener('click', (e) => { const n = e.target.closest('[data-world]'); if (n) go('world/' + n.dataset.world); });
   $('#map').addEventListener('keydown', (e) => { const n = e.target.closest('[data-world]'); if (n && (e.key === 'Enter' || e.key === ' ')) go('world/' + n.dataset.world); });
+}
+
+// After a world opens, the party walks from the old world to the new one.
+function walkParty(toId) {
+  let from = '';
+  try { from = sessionStorage.getItem('walk') || ''; sessionStorage.removeItem('walk'); } catch { /* storage blocked */ }
+  const g = $('#map .party');
+  if (!g || !from || !NODES[from] || !NODES[toId]) return;
+  // CSS lengths on SVG elements are in the map's own units (400 x 760).
+  const dx = NODES[from].x - NODES[toId].x;
+  const dy = NODES[from].y - NODES[toId].y;
+  g.style.transform = `translate(${dx}px, ${dy}px)`;
+  $('#map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    g.style.transition = 'transform 2.6s cubic-bezier(.45,.05,.35,1)';
+    g.style.transform = 'translate(0, 0)';
+    setTimeout(() => play('star'), 2500);
+  }));
 }
 
 async function worldView({ args }) {
@@ -438,7 +466,7 @@ async function worldView({ args }) {
     </div>
     <div class="panel tight"><p style="margin:0"><b>🎁 ${esc(tr(w, 'key'))}</b> · ${esc(tr(w, 'reward'))}</p>
       <p class="hint" style="margin:6px 0 0">${t('suggested_dates')}: ${fmtDate(w.start)} – ${fmtDate(w.end)}. ${t('no_rush')}</p></div>
-    ${w.status === 'active' ? `<a class="btn primary block" href="#/missions">${t('see_missions')}</a>` : ''}`;
+    ${w.status === 'active' ? `<a class="btn primary block" href="#/log">＋ ${t('log_activity')}</a>` : ''}`;
   $('#unlock')?.addEventListener('click', async () => {
     if (!(await ask(t('confirm_unlock') + '?', { okLabel: t('yes') }))) return;
     try {
@@ -466,7 +494,7 @@ function genderField(current = '') {
 }
 
 async function genderView() {
-  if (S.me.gender) return go('map');
+  if (S.me.gender) return go('home');
   app.innerHTML = `<div class="panel"><h2>${t('gender_title')}</h2><p>${t('gender_body')}</p><form id="gf">${genderField()}
     <button class="btn primary block">${t('save')}</button></form></div>`;
   $('#gf').onsubmit = async (e) => {
@@ -475,7 +503,7 @@ async function genderView() {
     try {
       await api('POST', '/me/gender', { gender: g });
       S.me.gender = g;
-      go(S.character ? 'map' : 'create');
+      go(S.character ? 'home' : 'create');
     } catch (err) { toast(errText(err), true); }
   };
 }
@@ -656,84 +684,186 @@ async function challengeView({ args }) {
   };
 }
 
-// ---------- missions ----------
-const missionMatches = (def, world) => world && (world.tag === 'five_paths' || def.tags.includes(world.tag));
+// ---------- game moments: level up and new world ----------
+// Remembers per device what the member has already seen, then celebrates anything new.
+function seenState() {
+  try { return JSON.parse(localStorage.getItem('seen:' + S.me.id) || 'null'); } catch { return null; }
+}
+function saveSeen(v) { try { localStorage.setItem('seen:' + S.me.id, JSON.stringify(v)); } catch { /* storage blocked */ } }
 
-async function missions({ query }) {
+async function checkMoments(worlds, stats, members) {
+  const unlocked = worlds.filter((p) => p.world.status === 'unlocked').length;
+  const seen = seenState();
+  saveSeen({ unlocked, level: stats.level });
+  if (!seen) return;
+  if (unlocked > seen.unlocked) {
+    const next = worlds.find((p) => p.world.status === 'active')?.world;
+    const opened = worlds.filter((p) => p.world.status === 'unlocked').pop()?.world;
+    try { sessionStorage.setItem('walk', opened?.id || ''); } catch { /* storage blocked */ }
+    play('unlock');
+    confetti();
+    const m = modal(`<div class="moment">
+      <div class="moment-key">🔑</div>
+      <h2>${next ? t('new_world') : t('victory')}</h2>
+      ${next ? worldArt(next, 'world-art') : art('victory.webp', 'world-art', t('victory'))}
+      <h3 style="margin:10px 0 4px">${next ? esc(tr(next, 'name')) : ''}</h3>
+      <p>${next ? esc(tr(next, 'story')) : t('victory_body')}</p>
+      <div class="moment-party">${(members || []).slice(0, 12).map((x) => avatarSVG({ ...x.look, show: {} }, { classId: x.class_id, frame: false, companion: false })).join('')}</div>
+      <a class="btn gold block" href="#/${next ? 'map' : 'celebrate'}" id="mgo">${next ? t('walk_there') : t('see_celebration')}</a></div>`);
+    $('#mgo', m.el).addEventListener('click', m.close);
+    return;
+  }
+  if (stats.level > seen.level) {
+    const lvl = S.levels.find((l) => l.level === stats.level);
+    play('level');
+    confetti();
+    const m = modal(`<div class="moment">
+      <div class="moment-badge">${stats.level}</div>
+      <h2>${t('level_up')}</h2>
+      <div class="moment-avatar">${avatarSVG(S.character.look, { classId: S.character.class_id })}</div>
+      <h3 style="margin:8px 0 4px">${esc(tr(lvl, 'title'))}</h3>
+      <p>🎁 ${esc(tr(lvl, 'prize'))}</p>
+      <button class="btn gold block" id="mok">${t('ok')}</button></div>`);
+    $('#mok', m.el).onclick = m.close;
+  }
+}
+
+// ---------- home ("Hoy") ----------
+const timeAgo = (d) => {
+  const ms = Date.now() - new Date(d.replace(' ', 'T') + (d.includes('Z') ? '' : 'Z')).getTime();
+  const min = Math.max(1, Math.round(ms / 60000));
+  if (min < 60) return t('ago_min', { n: min });
+  const h = Math.round(min / 60);
+  return h < 24 ? t('ago_h', { n: h }) : fmtDate(d);
+};
+
+async function homeView() {
+  const [worlds, me, members, feed, notices] = await Promise.all([api('GET', '/worlds'), api('GET', '/me'), api('GET', '/members'), api('GET', '/feed'), api('GET', '/news')]);
+  S.character = me.character;
+  const s = me.stats;
+  const active = worlds.find((p) => p.world.status === 'active');
+  const finished = worlds.every((p) => p.world.status === 'unlocked');
+  const byId = Object.fromEntries(members.map((m) => [m.id, m]));
+  const head = (id) => (byId[id] ? avatarSVG({ ...byId[id].look, show: {} }, { classId: byId[id].class_id, crop: 'head' }) : '');
+  const lvl = S.levels.find((l) => l.level === s.level);
+
+  let h = '';
+  if (finished) {
+    h += `<a class="hero-world" href="#/celebrate">${art('victory.webp', 'hero-img')}<div class="hero-text"><small>${t('journey_done')}</small><b>🎉 ${t('victory')}</b></div></a>`;
+  } else if (active) {
+    const w = active.world;
+    h += `<a class="hero-world" href="#/world/${w.id}">${worldArt(w, 'hero-img')}
+      <div class="hero-text"><small>${t('world_n', { n: w.ord })}</small><b>${esc(tr(w, 'name'))}</b></div>
+      <div class="hero-me">${avatarSVG(me.character.look, { classId: me.character.class_id, frame: false })}</div></a>`;
+  }
+  h += `<a class="btn primary block big-cta" href="#/log">＋ ${t('log_activity')}</a>`;
+
+  // My numbers
+  h += `<div class="stat-grid home-stats">
+    <div class="stat"><b>⭐ ${s.xp}</b><span>${t('my_stars')}</span></div>
+    <div class="stat"><b>+${s.today_stars}</b><span>${t('today')}</span></div>
+    <a class="stat" href="#/me"><b>${s.level}</b><span>${esc(tr(lvl, 'title'))}</span></a></div>`;
+
+  // Group progress + my pair
+  if (active) {
+    const w = active.world;
+    const ch = active.challenge;
+    h += `<div class="panel"><div class="panel-title"><h2>${t('group_progress')}</h2>${worldStatusPill(w.status)}</div>
+      ${w.star_target ? bar('⭐ ' + t('stars'), active.stars, w.star_target, 'gold') : ''}
+      ${ch ? `<p style="font-weight:700;margin:12px 0 0">🎯 ${esc(chText(ch))}</p>${challengeBar(ch)}` : ''}
+      ${active.eligible ? `<p style="margin:12px 0 0;font-weight:800;color:var(--green-d)">✨ ${t('eligible')}</p>` : ''}</div>`;
+    if (ch?.type === 'pair') {
+      const b = await api('GET', '/challenge/' + w.id);
+      const mine = b.pairs.find((p) => p.mine);
+      if (mine) {
+        h += `<a class="panel pair-card" href="#/challenge/${w.id}"><div class="panel-title"><h2>${t('my_pair')}</h2><span class="chev">›</span></div>
+          <div class="pair-row"><span class="pair-faces">${mine.members.map((id) => `<span>${head(id)}</span>`).join('')}</span><b>${mine.members.map((id) => esc(byId[id]?.alias || '')).join(' & ')}</b></div>
+          ${ch.items.map((it) => bar(esc(itemLabel(it)), mine.progress[it.key] || 0, it.target)).join('')}
+          ${mine.complete ? `<p style="margin:10px 0 0;font-weight:800;color:var(--green-d)">✅ ${t('st_done')}</p>` : `<span class="btn small gold" style="margin-top:12px">📝 ${t('log_progress')}</span>`}</a>`;
+      } else if (!b.my.excused) {
+        const invites = b.my.incoming.length;
+        h += `<a class="panel pair-card need" href="#/challenge/${w.id}"><div class="panel-title"><h2>🤝 ${t('choose_partner')}</h2><span class="chev">›</span></div>
+          <p style="margin:0">${invites ? `<b>${t('you_have_invites', { n: invites })}</b>` : t('choose_hint')}</p></a>`;
+      }
+    } else if (ch) {
+      h += `<a class="panel pair-card" href="#/challenge/${w.id}"><div class="panel-title"><h2>🍇 ${t('group_challenge')}</h2><span class="chev">›</span></div>
+        <p style="margin:0">${t('fruit_hint')}</p></a>`;
+    }
+  }
+
+  // Notices from coordinators
+  if (notices.length) {
+    h += `<div class="panel"><h2>📣 ${t('notices')}</h2>${notices.slice(0, 3).map((n) => `<div class="news-item"><time>${fmtDate(n.at)}</time><h3 style="margin:2px 0">${esc(n.title)}</h3>${n.body ? `<p style="margin:0">${esc(n.body)}</p>` : ''}</div>`).join('')}</div>`;
+  }
+
+  // Group activity
+  h += `<div class="panel"><h2>${t('group_activity')}</h2>${feed.length ? feed.map((f) => `<div class="feed-row"><span class="feed-face">${head(f.user_id)}</span>
+      <div class="grow"><b>${esc(f.alias)}</b>${f.others ? ` +${f.others}` : ''} · ${esc(tr(f, 'name'))}<div class="hint" style="margin:0">${timeAgo(f.updated_at)}</div></div>
+      <span class="feed-pts">+${f.quantity * f.points_per_unit} ⭐</span></div>`).join('') : `<p>${t('feed_empty')}</p>`}</div>`;
+
+  app.innerHTML = h;
+  checkMoments(worlds, s, members);
+}
+
+// ---------- log an activity ----------
+const GROUPS = [
+  { cat: 'preaching', icon: '📣' }, { cat: 'education', icon: '📖' },
+  { cat: 'shepherd', icon: '🐑' }, { cat: 'service', icon: '🤲' },
+];
+
+async function logView({ query }) {
   const [defs, worlds] = await Promise.all([api('GET', '/missions'), api('GET', '/worlds')]);
-  const active = worlds.find((p) => p.world.status === 'active')?.world;
-  const cats = ['all', 'preaching', 'education', 'shepherd', 'service', 'unity', 'special'];
-  if (defs.some((d) => d.kind === 'card')) cats.push('card');
-  let cat = query.get('cat') || 'all';
+  const active = worlds.find((p) => p.world.status === 'active');
+  let cat = query.get('cat') || '';
   const draw = () => {
-    const list = defs.filter((d) => cat === 'all' ? d.kind !== 'card' : cat === 'special' ? d.kind === 'special' : cat === 'card' ? d.kind === 'card' : d.category === cat && d.kind !== 'card');
-    $('#chips').innerHTML = cats.map((c) => `<button class="chip ${c === cat ? 'on' : ''}" data-cat="${c}">${c === 'all' ? '' : (CAT_ICON[c] || '⭐') + ' '}${t('cat.' + c)}</button>`).join('');
-    $('#list').innerHTML = list.map((d) => {
-      const capped = d.daily_cap != null && d.used_today >= d.daily_cap;
-      const disabled = capped || d.done;
-      const helps = missionMatches(d, active);
-      return `<button class="mission" data-id="${d.id}" ${disabled ? 'disabled' : ''}>
-        <span class="ico cat-${d.category}">${CAT_ICON[d.category] || '⭐'}</span>
-        <span class="body"><span class="name">${esc(tr(d, 'name'))}</span>
-          <span class="meta"><span>${esc(tr(d, 'freq'))}</span>
-            ${d.kind === 'special' ? `<span class="tag special">⭐ ${t('special')}</span>` : ''}
-            ${d.min_participants > 1 ? `<span class="tag">👥 ${t('min_people', { n: d.min_participants })}</span>` : ''}
-            ${helps ? `<span class="tag" style="background:#BFF0C9;color:#1E5B2E">🔑 ${esc(tr(active, 'obstacle'))}</span>` : ''}
-            ${d.daily_cap != null ? `<span>${t('today_used', { u: d.used_today, c: d.daily_cap })}</span>` : ''}
-            ${d.done ? `<span class="tag">✔ ${t('card_done')}</span>` : ''}
-          </span></span>
-        <span class="pts">+${d.points}</span></button>`;
-    }).join('');
+    let h = `<h1>${t('what_did_you_do')}</h1>`;
+    if (active?.challenge) {
+      h += `<a class="panel tight challenge-banner" href="#/challenge/${active.world.id}">🎯 <span><b>${t('challenge')}:</b> ${esc(chText(active.challenge))}</span><span class="chev">›</span></a>`;
+    }
+    h += `<div class="group-tiles">${GROUPS.map((g) => `<button class="group-tile cat-${g.cat} ${cat === g.cat ? 'on' : ''}" data-cat="${g.cat}">
+      <span class="gt-icon">${g.icon}</span><span class="gt-name">${t('grp.' + g.cat)}</span><span class="gt-sub">${defs.filter((d) => d.category === g.cat).length} ${t('activities')}</span></button>`).join('')}</div>`;
+    if (cat) {
+      h += `<div class="mission-list" style="margin-top:16px">${defs.filter((d) => d.category === cat).map((d) => {
+        const capped = d.daily_cap != null && d.used_today >= d.daily_cap;
+        return `<button class="mission" data-id="${d.id}" ${capped ? 'disabled' : ''}>
+          <span class="ico cat-${d.category}">${GROUPS.find((g) => g.cat === d.category)?.icon || '⭐'}</span>
+          <span class="body"><span class="name">${esc(tr(d, 'name'))}</span>
+            <span class="meta"><span>${esc(tr(d, 'freq'))}</span>${capped ? `<span class="tag">✔ ${t('done_today')}</span>` : ''}</span></span>
+          <span class="pts">+${d.points}</span></button>`;
+      }).join('')}</div>`;
+    }
+    app.innerHTML = h;
   };
-  const activeP = worlds.find((p) => p.world.status === 'active');
-  const banner = activeP?.challenge ? `<a class="panel tight challenge-banner" href="#/challenge/${activeP.world.id}">🎯 <span><b>${t('challenge')}:</b> ${esc(chText(activeP.challenge))}</span><span class="chev">›</span></a>` : '';
-  app.innerHTML = `<h1>${t('nav_missions')}</h1>${banner}<div class="chips" id="chips"></div><div class="mission-list" id="list"></div>`;
-  $('#chips').onclick = (e) => { const b = e.target.closest('[data-cat]'); if (b) { cat = b.dataset.cat; draw(); } };
-  $('#list').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b && !b.disabled) go('report/' + b.dataset.id); };
   draw();
+  app.onclick = (e) => {
+    const g = e.target.closest('[data-cat]');
+    if (g) { play('tap'); cat = cat === g.dataset.cat ? '' : g.dataset.cat; history.replaceState(null, '', '#/log' + (cat ? '?cat=' + cat : '')); draw(); return; }
+    const m = e.target.closest('.mission[data-id]');
+    if (m && !m.disabled) go('report/' + m.dataset.id);
+  };
 }
 
 async function report({ args, name }) {
   const fixing = name === 'fix';
-  const [defs, members, me, mine] = await Promise.all([api('GET', '/missions'), api('GET', '/members'), api('GET', '/me'), fixing ? api('GET', '/claims/mine') : null]);
-  let claim = null;
-  let def;
-  if (fixing) {
-    claim = mine.find((c) => c.id === Number(args[0]));
-    if (!claim) return go('me');
-    def = defs.find((d) => d.id === claim.def_id) || (await api('GET', '/missions')).find((d) => d.id === claim.def_id);
-  } else {
-    def = defs.find((d) => d.id === args[0]);
-  }
-  if (!def) return go('missions');
-  const contacts = def.contact !== 'none' ? await api('GET', '/contacts') : [];
-  const cls = classById(me.character.class_id);
-  const abilityFits = cls && (cls.category ? def.category === cls.category && def.tags.includes(cls.tag) : def.tags.includes(cls.tag));
+  const [defs, members, mine] = await Promise.all([api('GET', '/missions'), api('GET', '/members'), fixing ? api('GET', '/claims/mine') : null]);
+  const claim = fixing ? mine.find((c) => c.id === Number(args[0])) : null;
+  if (fixing && !claim) return go('me');
+  const def = defs.find((d) => d.id === (fixing ? claim.def_id : args[0]));
+  if (!def) return go('log');
   const others = members.filter((m) => m.id !== S.me.id);
-  const st = {
-    qty: claim?.quantity || 1,
-    date: claim?.performed_at || localDate(),
-    people: new Set((claim?.participants || []).map((p) => p.id)),
-    contact: claim?.contact_id || null,
-    ability: !!claim?.use_ability,
-    key: newKey(),
-  };
-  const maxQty = def.daily_cap != null ? Math.max(1, def.daily_cap - (fixing ? 0 : def.used_today)) : 50;
+  const st = { qty: claim?.quantity || 1, date: claim?.performed_at || localDate(), people: new Set((claim?.participants || []).map((p) => p.id)), key: newKey() };
+  const maxQty = def.daily_cap != null ? Math.max(1, def.daily_cap - (fixing ? 0 : def.used_today)) : 200;
   const showQty = def.daily_cap !== 1;
   const today = localDate();
   const yesterday = localDate(new Date(Date.now() - 86400e3));
   const minDate = localDate(new Date(Date.now() - 14 * 86400e3));
-  const scopeNote = def.kind === 'card' ? `<p class="hint">🃏 ${t('card_bonus')}: ${t('scope_' + (def.reward_scope || 'bonus'))}</p>` : '';
+  const icon = GROUPS.find((g) => g.cat === def.category)?.icon || '⭐';
 
-  const contactOk = (c) => def.contact === 'pre04' ? c.baptism === 'none' : def.contact === 'pre05' ? c.baptism === 'approved' && c.keeping === 'none' : true;
-
-  app.innerHTML = `<div class="panel">
-      <div class="panel-title"><div style="display:flex;gap:10px;align-items:center"><span class="ico cat-${def.category}" style="width:48px;height:48px;border-radius:14px;border:2.5px solid var(--line);display:grid;place-items:center;font-size:1.5rem">${CAT_ICON[def.category] || '⭐'}</span>
-        <div><h2 style="margin:0">${esc(tr(def, 'name'))}</h2><div class="hint" style="margin:0">${esc(tr(def, 'freq'))}</div></div></div>
-        <span class="pts" style="font-family:var(--font-head);font-weight:700;background:var(--gold);border:2.5px solid var(--line);border-radius:12px;padding:4px 8px;color:#2A2238;white-space:nowrap">+${def.points} ⭐</span></div>
-      ${scopeNote}
-      ${claim?.coord_message ? `<div class="claim"><div class="coord-msg">💬 ${esc(claim.coord_message)}</div></div>` : ''}
-    </div>
+  app.innerHTML = `<div class="panel report-head cat-${def.category}">
+      <span class="gt-icon">${icon}</span>
+      <div class="grow"><h2 style="margin:0">${esc(tr(def, 'name'))}</h2><div class="hint" style="margin:0">${esc(tr(def, 'freq'))}</div></div>
+      <span class="pts">+${def.points} ⭐</span></div>
+    ${claim?.coord_message ? `<div class="panel tight"><div class="coord-msg">💬 ${esc(claim.coord_message)}</div></div>` : ''}
     <form id="f" class="panel">
       ${showQty ? `<div class="field"><span style="font-weight:800;display:block;margin-bottom:6px">${t('quantity')}</span>
         <div class="stepper"><button type="button" data-q="-1" aria-label="-">−</button><output id="qty">${st.qty}</output><button type="button" data-q="1" aria-label="+">+</button>
@@ -741,26 +871,18 @@ async function report({ args, name }) {
       <div class="field" style="margin-top:14px"><span style="font-weight:800;display:block;margin-bottom:6px">${t('date')}</span>
         <div class="chips"><button type="button" class="chip" data-date="${today}">${t('today')}</button><button type="button" class="chip" data-date="${yesterday}">${t('yesterday')}</button>
         <input type="date" id="date" value="${st.date}" min="${minDate}" max="${today}" style="width:auto;min-height:40px"></div></div>
-      ${def.contact !== 'none' ? `<div class="field" style="margin-top:14px"><span style="font-weight:800;display:block;margin-bottom:6px">${t('contact')}</span>
-        <div class="chips" id="contacts"></div><div class="hint">🔒 ${t('contact_hint')}</div></div>` : ''}
       ${def.confirm ? `<label class="check" style="margin-top:14px"><input type="checkbox" id="confirm" ${claim ? 'checked' : ''}> ${t('confirm_course')}</label>` : ''}
-      ${others.length ? `<div class="field" style="margin-top:16px"><span style="font-weight:800;display:block;margin-bottom:4px">${t('companions')} ${def.min_participants > 1 ? `<span class="tag">👥 ${t('min_people', { n: def.min_participants })}</span>` : ''}</span>
-        <div class="hint" style="margin-bottom:8px">${t('companions_hint')}</div>
+      ${others.length ? `<details class="field companions" style="margin-top:16px" ${st.people.size ? 'open' : ''}><summary>👥 ${t('companions')} <span id="pcount"></span></summary>
+        <div class="hint" style="margin:6px 0 8px">${t('companions_hint')}</div>
         ${others.length > 8 ? `<input type="search" id="psearch" placeholder="${esc(t('search'))}" style="margin-bottom:8px">` : ''}
-        <div class="people-grid" id="people"></div></div>` : ''}
-      ${abilityFits ? `<div class="panel tight" style="box-shadow:none;background:#FFF6D6;color:#2A2238;margin-top:14px">
-        <label class="check"><input type="checkbox" id="ability" ${st.ability ? 'checked' : ''} ${me.stats.ability_used && !claim?.use_ability ? 'disabled' : ''}> ✨ ${t('use_ability')}</label>
-        <div class="hint" style="color:#5B5470">${esc(tr(cls, 'ability'))}${me.stats.ability_used && !claim?.use_ability ? ' · ' + t('ability_used') : ''}</div></div>` : ''}
+        <div class="people-grid" id="people"></div></details>` : ''}
       <label class="field" style="margin-top:14px"><span>${t('note')}</span><textarea id="note" maxlength="300">${esc(claim?.note || '')}</textarea><div class="hint">🔒 ${t('note_hint')}</div></label>
+      ${def.needs_approval ? `<p class="hint">⏳ ${t('needs_approval_note')}</p>` : ''}
       <div id="err"></div>
       <button class="btn primary block" type="submit">${fixing ? t('fix') : t('send')}</button>
     </form>`;
 
-  const drawQty = () => {
-    if (!showQty) return;
-    $('#qty').textContent = st.qty;
-    $('#qpts').textContent = '= +' + st.qty * def.points + ' ⭐';
-  };
+  const drawQty = () => { if (!showQty) return; $('#qty').textContent = st.qty; $('#qpts').textContent = '= +' + st.qty * def.points + ' ⭐'; };
   const drawDate = () => $$('[data-date]').forEach((c) => c.classList.toggle('on', c.dataset.date === st.date));
   const drawPeople = (filter = '') => {
     const box = $('#people');
@@ -768,34 +890,17 @@ async function report({ args, name }) {
     const f = filter.trim().toLowerCase();
     box.innerHTML = others.filter((m) => !f || m.alias.toLowerCase().includes(f) || st.people.has(m.id)).map((m) =>
       `<button type="button" class="person ${st.people.has(m.id) ? 'on' : ''}" data-pid="${m.id}"><span class="face">${avatarSVG({ ...m.look, show: {} }, { classId: m.class_id, crop: 'head' })}</span><span>${st.people.has(m.id) ? '✔ ' : ''}${esc(m.alias)}</span></button>`).join('');
+    $('#pcount').textContent = st.people.size ? `(${st.people.size})` : '';
   };
-  const drawContacts = () => {
-    const box = $('#contacts');
-    if (!box) return;
-    let h = contacts.filter(contactOk).map((c) => `<button type="button" class="chip ${st.contact === c.id ? 'on' : ''}" data-contact="${c.id}">🌱 ${esc(c.token)}</button>`).join('');
-    if (def.contact === 'pre02') h = `<button type="button" class="chip ${!st.contact ? 'on' : ''}" data-contact="">${t('no_contact')}</button>` + h;
-    if (def.contact !== 'pre05') h += `<button type="button" class="chip" id="newc">＋ ${t('new_contact')}</button>`;
-    box.innerHTML = h;
-  };
-  drawQty(); drawDate(); drawPeople(); drawContacts();
+  drawQty(); drawDate(); drawPeople();
 
-  $('#f').addEventListener('click', async (e) => {
+  $('#f').addEventListener('click', (e) => {
     const q = e.target.closest('[data-q]');
-    if (q) { st.qty = Math.max(1, Math.min(maxQty, st.qty + Number(q.dataset.q))); drawQty(); return; }
+    if (q) { play('tap'); st.qty = Math.max(1, Math.min(maxQty, st.qty + Number(q.dataset.q))); drawQty(); return; }
     const d = e.target.closest('[data-date]');
     if (d) { st.date = d.dataset.date; $('#date').value = st.date; drawDate(); return; }
     const p = e.target.closest('[data-pid]');
-    if (p) { const id = Number(p.dataset.pid); st.people.has(id) ? st.people.delete(id) : st.people.add(id); drawPeople($('#psearch')?.value || ''); return; }
-    const c = e.target.closest('[data-contact]');
-    if (c) { st.contact = c.dataset.contact ? Number(c.dataset.contact) : null; drawContacts(); return; }
-    if (e.target.closest('#newc')) {
-      try {
-        const nc = await api('POST', '/contacts', {});
-        contacts.unshift({ ...nc, baptism: 'none', keeping: 'none', meaningful: 0 });
-        st.contact = nc.id;
-        drawContacts();
-      } catch (err) { toast(errText(err), true); }
-    }
+    if (p) { const id = Number(p.dataset.pid); st.people.has(id) ? st.people.delete(id) : st.people.add(id); drawPeople($('#psearch')?.value || ''); }
   });
   $('#date').onchange = (e) => { st.date = e.target.value; drawDate(); };
   $('#psearch')?.addEventListener('input', (e) => drawPeople(e.target.value));
@@ -804,42 +909,43 @@ async function report({ args, name }) {
     e.preventDefault();
     const body = {
       mission_def_id: def.id, quantity: st.qty, performed_at: st.date, participant_ids: [...st.people],
-      contact_id: st.contact, confirmed: $('#confirm')?.checked || false, use_ability: $('#ability')?.checked || false,
-      note: $('#note').value, idempotency_key: st.key,
+      confirmed: $('#confirm')?.checked || false, note: $('#note').value, idempotency_key: st.key,
     };
     const btn = $('#f button[type=submit]');
     btn.disabled = true;
     try {
+      let status = 'pending';
       if (fixing) await api('PUT', '/claims/' + claim.id, body);
-      else await api('POST', '/claims', body);
-      const m = modal(`<div class="celebrate-pop"><div class="big">🌟</div><h2>${t('sent_title')}</h2><p>${t('sent_body')}</p>
-        <div class="btn-row"><a class="btn" href="#/missions" id="m1">${t('nav_missions')}</a><a class="btn primary" href="#/map" id="m2">${t('nav_map')}</a></div></div>`);
+      else status = (await api('POST', '/claims', body)).claim.status;
+      const got = st.qty * def.points * (status === 'approved' ? 1 : 0);
+      play(got ? 'star' : 'sent');
+      const m = modal(`<div class="celebrate-pop">
+        ${got ? `<div class="star-burst"><span>⭐</span><b>+${got}</b></div><h2>${t('stars_earned')}</h2><p>${t('stars_earned_body')}</p>`
+          : `<div class="big">📨</div><h2>${t('sent_title')}</h2><p>${t('sent_body')}</p>`}
+        <div class="btn-row"><a class="btn" href="#/log" id="m1">＋ ${t('log_another')}</a><a class="btn primary" href="#/home" id="m2">${t('nav_home')}</a></div></div>`);
       $$('a', m.el).forEach((a) => a.addEventListener('click', m.close));
-      confetti();
+      if (got) confetti();
     } catch (err) {
+      play('error');
       $('#err').innerHTML = `<div class="error-msg">${esc(errText(err))}</div>`;
       btn.disabled = false;
     }
   };
 }
 
-// ---------- me ----------
+// ---------- me ("Yo") ----------
 async function meView() {
   const [me, mine] = await Promise.all([api('GET', '/me'), api('GET', '/claims/mine')]);
   S.character = me.character;
   const s = me.stats;
   const cls = classById(me.character.class_id);
   const lvl = S.levels.find((l) => l.level === s.level);
-  const nextTxt = s.next_level_xp ? t('next_level', { n: s.next_level_xp }) : t('max_level');
-  const contribs = Object.entries(s.contributions).map(([k, v]) => `<span class="chip" style="cursor:default">${CAT_ICON[k] || '⭐'} ${t('cat.' + k)}: ${v}</span>`).join('');
-  const contacts = await api('GET', '/contacts');
   const claimRow = (c) => {
     const result = c.result?.members?.[S.me.id];
     const isMine = c.user.id === S.me.id;
-    return `<div class="claim"><div class="top"><div><div class="name">${CAT_ICON[c.category] || '⭐'} ${esc(c.mission)} ${c.quantity > 1 ? '×' + c.quantity : ''}</div>
-      <div class="sub">${fmtDate(c.performed_at)}${!isMine ? ` · ${t('with')} ${esc(c.user.alias)}` : c.participants.length ? ` · ${t('with')} ${c.participants.map((p) => esc(p.alias)).join(', ')}` : ''}${c.contact ? ' · 🌱 ' + esc(c.contact) : ''}</div></div>
-      <div style="text-align:right">${statusPill(c.status)}${result ? `<div class="sub" style="font-weight:800">+${result.xp} XP</div>` : ''}</div></div>
-      ${result?.notes?.length ? `<div class="sub">ℹ️ ${result.notes.map((n) => t('cap_note.' + n)).join(' · ')}</div>` : ''}
+    return `<div class="claim"><div class="top"><div><div class="name">${GROUPS.find((g) => g.cat === c.category)?.icon || '⭐'} ${esc(c.mission)} ${c.quantity > 1 ? '×' + c.quantity : ''}</div>
+      <div class="sub">${fmtDate(c.performed_at)}${!isMine ? ` · ${t('with')} ${esc(c.user.alias)}` : c.participants.length ? ` · ${t('with')} ${c.participants.map((p) => esc(p.alias)).join(', ')}` : ''}</div></div>
+      <div style="text-align:right">${statusPill(c.status)}${result ? `<div class="sub" style="font-weight:800">+${result.xp} ⭐</div>` : ''}</div></div>
       ${c.coord_message ? `<div class="coord-msg">💬 ${esc(c.coord_message)}</div>` : ''}
       ${c.status === 'needs_changes' && isMine ? `<a class="btn small blue" style="margin-top:8px" href="#/fix/${c.id}">✏️ ${t('fix')}</a>` : ''}</div>`;
   };
@@ -849,24 +955,17 @@ async function meView() {
         ${me.character.look.show?.title ? `<span class="title-ribbon">🏅 ${esc(tr(lvl, 'title'))}</span>` : ''}
         <div style="font-weight:800">${esc(tr(cls, 'name'))}</div>
         ${me.character.motto ? `<p class="story" style="margin:4px 0">“${esc(me.character.motto)}”</p>` : ''}
-        <div class="bar-label"><span>${t('level')} ${s.level} · ${esc(tr(lvl, 'title'))}</span><span>${s.xp} ${t('xp')}</span></div>
+        <div class="bar-label"><span>${t('level')} ${s.level} · ${esc(tr(lvl, 'title'))}</span><span>${s.xp} ⭐</span></div>
         <div class="bar gold"><i style="width:${s.next_level_xp ? pct(s.xp - s.level_min_xp, s.next_level_xp - s.level_min_xp) : 100}%"></i></div>
-        <div class="hint">${nextTxt}${s.pending_xp ? ' · ' + t('pending_xp', { n: s.pending_xp }) : ''}</div>
+        <div class="hint">${s.next_level_xp ? t('next_level', { n: s.next_level_xp }) : t('max_level')}${s.pending_xp ? ' · ' + t('pending_xp', { n: s.pending_xp }) : ''}</div>
         <a class="btn small" style="margin-top:10px" href="#/edit">🎨 ${t('edit_character')}</a></div></div></div>
-    <div class="panel"><h2>${t('this_week')}</h2>
-      ${bar(t('week_base'), s.week_base, S.settingsCaps?.base ?? 60, 'blue')}
-      ${bar(t('week_bonus'), s.week_bonus, S.settingsCaps?.bonus ?? 20, 'gold')}
-      <p class="hint" style="margin-top:8px">${t('weekly_note')}</p>
-      ${cls ? `<p style="margin:8px 0 0"><b>✨ ${t('ability')}:</b> ${esc(tr(cls, 'ability'))} ${s.ability_used ? `<span class="tag">✔ ${t('ability_used')}</span>` : ''}</p>` : ''}
-    </div>
-    ${contribs ? `<div class="panel"><h2>${t('my_contributions')}</h2><div class="chips" style="flex-wrap:wrap">${contribs}</div></div>` : ''}
     <div class="panel"><h2>${t('level_rewards')}</h2>${S.levels.map((l) => `<div class="reward-row ${s.xp >= l.min_xp ? 'got' : ''}"><div class="lv">${l.level}</div>
-      <div class="grow"><b>${esc(tr(l, 'title'))}</b><div class="hint" style="margin:0">${esc(tr(l, 'prize'))} · ${l.min_xp} XP</div></div>${s.xp >= l.min_xp ? '✔' : '🔒'}</div>`).join('')}</div>
-    ${contacts.length ? `<div class="panel"><h2>🌱 ${t('my_fruits')}</h2><p class="hint">${t('fruits_hint')}</p>
-      ${contacts.map((c) => `<div class="reward-row"><span class="code">${esc(c.token)}</span><div class="grow"></div>
-        <span class="tag">${t('baptism')}: ${t('status.' + c.baptism)}</span><span class="tag">${t('keeping')}: ${t('status.' + c.keeping)}</span></div>`).join('')}</div>` : ''}
-    <div class="panel"><h2>${t('history')}</h2>${mine.length ? mine.map(claimRow).join('') : `<p>${t('empty_history')}</p><a class="btn primary" href="#/missions">${t('see_missions')}</a>`}</div>
-    <div class="panel"><div class="btn-row"><button class="btn" id="pinbtn">🔑 ${t('change_pin')}</button><button class="btn" id="out">🚪 ${t('logout')}</button></div></div>`;
+      <div class="grow"><b>${esc(tr(l, 'title'))}</b><div class="hint" style="margin:0">${esc(tr(l, 'prize'))} · ${l.min_xp} ⭐</div></div>${s.xp >= l.min_xp ? '✔' : '🔒'}</div>`).join('')}</div>
+    <div class="panel"><h2>${t('history')}</h2>${mine.length ? mine.slice(0, 40).map(claimRow).join('') : `<p>${t('empty_history')}</p><a class="btn primary" href="#/log">＋ ${t('log_activity')}</a>`}</div>
+    <div class="panel"><h2>${t('settings_title')}</h2>
+      <label class="check switch-row"><input type="checkbox" id="snd" ${isMuted() ? '' : 'checked'}> 🔊 ${t('sounds')}</label>
+      <div class="btn-row" style="margin-top:12px"><button class="btn" id="pinbtn">🔑 ${t('change_pin')}</button><button class="btn" id="out">🚪 ${t('logout')}</button></div></div>`;
+  $('#snd').onchange = (e) => { setMuted(!e.target.checked); play('tap'); };
   $('#out').onclick = async () => { await api('POST', '/auth/logout', {}); S.me = null; S.character = null; go('welcome'); };
   $('#pinbtn').onclick = () => {
     const m = modal(`<h3>${t('change_pin')}</h3><form id="pf">
@@ -882,28 +981,47 @@ async function meView() {
   };
 }
 
-// ---------- news ----------
-async function news() {
-  const [items, defs] = await Promise.all([api('GET', '/news'), api('GET', '/missions')]);
-  const cards = defs.filter((d) => d.kind === 'card');
-  app.innerHTML = `<h1>${t('nav_news')}</h1>
-    ${cards.length ? `<div class="panel"><h2>🃏 ${t('mystery_cards')}</h2><div class="mission-list">${cards.map((d) => `<div class="mission" style="cursor:default">
-      <span class="ico cat-card">🃏</span><span class="body"><span class="name">${esc(tr(d, 'name'))}</span><span class="meta"><span>${esc(tr(d, 'freq'))}</span><span>${t('scope_' + (d.reward_scope || 'bonus'))}</span></span></span>
-      ${d.done ? `<span class="tag">✔ ${t('card_done')}</span>` : `<a class="btn small primary" href="#/report/${d.id}">${t('accept_card')}</a>`}</div>`).join('')}</div></div>` : ''}
-    <div class="panel">${items.length ? items.map((n) => `<div class="news-item ${n.card_id ? 'card' : ''}"><time>${fmtDate(n.at)}</time><h3 style="margin:2px 0">${esc(n.title)}</h3>${n.body ? `<p style="margin:0">${esc(n.body)}</p>` : ''}</div>`).join('') : `<p>${t('news_empty')}</p>`}</div>`;
-}
-
-// ---------- leader ----------
-const LEAD_TABS_COORD = ['queue', 'panel', 'invites'];
-const LEAD_TABS_ADMIN = ['settings', 'missions', 'worlds', 'cards', 'users', 'fix', 'audit'];
+// ---------- leader: Aprobar · Grupo · Ajustes ----------
+const LEAD_TABS = { approve: 'lead_approve', group: 'lead_group', setup: 'lead_setup' };
 
 async function lead({ args }) {
-  if (!isCoord()) return go('map');
-  const tabs = isAdmin() ? [...LEAD_TABS_COORD, ...LEAD_TABS_ADMIN] : LEAD_TABS_COORD;
-  const tab = tabs.includes(args[0]) ? args[0] : 'queue';
-  app.innerHTML = `<div class="chips">${tabs.map((k) => `<a class="chip ${k === tab ? 'on' : ''}" href="#/lead/${k}" style="text-decoration:none">${t('lead_' + k)}${k === 'queue' && pendingCount ? ` (${pendingCount})` : ''}</a>`).join('')}</div><div id="lead"></div>`;
+  if (!isCoord()) return go('home');
+  const tabs = isAdmin() ? ['approve', 'group', 'setup'] : ['approve', 'group'];
+  const tab = tabs.includes(args[0]) ? args[0] : 'approve';
+  app.innerHTML = `<div class="seg">${tabs.map((k) => `<a class="${k === tab ? 'on' : ''}" href="#/lead/${k}">${t(LEAD_TABS[k])}${k === 'approve' && pendingCount ? ` <b class="dot-inline">${pendingCount}</b>` : ''}</a>`).join('')}</div><div id="lead"></div>`;
   const box = $('#lead');
-  await ({ queue: leadQueue, panel: leadPanel, invites: leadInvites, settings: leadSettings, missions: leadMissions, worlds: leadWorlds, cards: leadCards, users: leadUsers, fix: leadFix, audit: leadAudit })[tab](box);
+  const parts = {
+    approve: [leadQueue, leadRecent],
+    group: [leadPanel, leadInvites, ...(isAdmin() ? [leadUsers] : [])],
+    setup: [leadWorlds, leadMissions, leadSettings, leadFix, leadAudit],
+  }[tab];
+  // Setup sections fold away so the admin screen stays short on a phone.
+  const folds = tab === 'setup' ? ['lead_worlds', 'lead_missions', 'lead_settings', 'adjust', 'lead_audit'] : null;
+  box.innerHTML = parts.map((_, i) => (folds
+    ? `<details class="fold"><summary>${t(folds[i])}</summary><div id="lp${i}"></div></details>`
+    : `<div id="lp${i}"></div>`)).join('');
+  await Promise.all(parts.map((fn, i) => fn($('#lp' + i))));
+}
+
+// Recently counted reports; a coordinator can remove a mistaken one (it is reversed, not deleted).
+async function leadRecent(box) {
+  const rows = (await api('GET', '/admin/claims?status=approved')).slice(0, 30);
+  box.innerHTML = `<div class="panel"><h2>${t('recent')}</h2><p class="hint">${t('void_hint')}</p>
+    ${rows.map((c) => `<div class="claim" data-cid="${c.id}"><div class="top"><div><div class="name">${GROUPS.find((g) => g.cat === c.category)?.icon || '⭐'} ${esc(c.mission)} ×${c.quantity}</div>
+      <div class="sub">${esc(c.user.alias)}${c.participants.length ? ' +' + c.participants.length : ''} · ${fmtDate(c.performed_at)}</div></div>
+      <button class="btn small" data-void>${t('remove')}</button></div></div>`).join('') || '<p>—</p>'}</div>`;
+  box.onclick = async (e) => {
+    const b = e.target.closest('[data-void]');
+    if (!b) return;
+    const id = b.closest('[data-cid]').dataset.cid;
+    const reason = await ask(t('remove') + '?', { input: true, placeholder: t('reason_ph'), danger: true, okLabel: t('remove') });
+    if (!reason) return;
+    try {
+      const r = await api('POST', `/admin/claims/${id}/void`, { reason });
+      toast(r.unlocked_world_affected ? t('unlocked_world_warning') : t('saved'), r.unlocked_world_affected);
+      leadRecent(box);
+    } catch (err) { toast(errText(err), true); }
+  };
 }
 
 async function leadQueue(box) {
@@ -918,8 +1036,6 @@ async function leadQueue(box) {
       <span class="pts" style="font-family:var(--font-head);font-weight:700;background:var(--gold);border:2.5px solid var(--line);border-radius:12px;padding:2px 8px;color:#2A2238">+${c.quantity * c.points_per_unit}</span></div>
     <div class="name" style="margin-top:8px">${CAT_ICON[c.category] || '⭐'} ${esc(c.mission)} ${c.quantity > 1 ? `× ${c.quantity}` : ''}</div>
     ${c.participants.length ? `<div class="sub">👥 ${c.participants.map((p) => esc(p.alias)).join(', ')}</div>` : ''}
-    ${c.contact ? `<div class="sub">🌱 ${esc(c.contact)}</div>` : ''}
-    ${c.use_ability ? `<div class="sub">✨ ${t('use_ability')}</div>` : ''}
     ${c.note ? `<div class="coord-msg" style="background:var(--panel-2);color:inherit">📝 ${esc(c.note)}</div>` : ''}
     ${c.same_day ? `<div class="warn">⚠️ ${t('same_day_warn', { n: c.same_day })}</div>` : ''}
     <div class="btn-row" style="margin-top:10px"><button class="btn small green" data-act="approve">✔ ${t('approve')}</button>
@@ -1039,17 +1155,25 @@ async function leadSettings(box) {
 
 async function leadMissions(box) {
   const d = await api('GET', '/admin/settings');
-  box.innerHTML = `<div class="panel"><h2>${t('lead_missions')}</h2><p class="hint">${t('version_note')}</p><div class="table-scroll"><table class="simple">
-    <thead><tr><th>ID</th><th></th><th>${t('points_label')}</th><th>${t('daily_cap')}</th><th>${t('active')}</th><th></th></tr></thead><tbody>
-    ${d.missions.map((m) => `<tr data-mid="${m.id}"><td><b>${m.id}</b></td><td>${esc(tr(m, 'name'))}</td><td><input type="number" name="points" value="${m.points}" min="0" max="1000"></td>
-      <td><input type="number" name="cap" value="${m.daily_cap ?? ''}" min="1" max="100" placeholder="∞"></td><td><input type="checkbox" name="active" ${m.active ? 'checked' : ''} style="width:22px;height:22px"></td>
-      <td><button class="btn small green" data-save>${t('save')}</button></td></tr>`).join('')}</tbody></table></div></div>`;
+  const row = (m) => `<tr data-mid="${m.id}"><td><b>${esc(tr(m, 'name'))}</b><div class="sub">${t('grp.' + m.category) || m.category}</div></td>
+      <td><input type="number" name="points" value="${m.points}" min="0" max="1000"></td>
+      <td><input type="number" name="cap" value="${m.daily_cap ?? ''}" min="1" max="100" placeholder="∞"></td>
+      <td><input type="checkbox" name="approval" ${m.needs_approval ? 'checked' : ''} style="width:22px;height:22px"></td>
+      <td><input type="checkbox" name="active" ${m.active ? 'checked' : ''} style="width:22px;height:22px"></td>
+      <td><button class="btn small green" data-save>${t('save')}</button></td></tr>`;
+  const head = `<thead><tr><th></th><th>⭐</th><th>${t('daily_cap')}</th><th>${t('approval_col')}</th><th>${t('active')}</th><th></th></tr></thead>`;
+  box.innerHTML = `<div class="panel"><h2>${t('lead_missions')}</h2><p class="hint">${t('version_note')}</p>
+    <div class="table-scroll"><table class="simple">${head}<tbody>${d.missions.filter((m) => m.active).map(row).join('')}</tbody></table></div>
+    <details style="margin-top:12px"><summary>${t('inactive_missions')}</summary><div class="table-scroll"><table class="simple">${head}<tbody>${d.missions.filter((m) => !m.active).map(row).join('')}</tbody></table></div></details></div>`;
   box.onclick = async (e) => {
     const b = e.target.closest('[data-save]');
     if (!b) return;
-    const row = b.closest('[data-mid]');
+    const r = b.closest('[data-mid]');
     try {
-      await api('PUT', '/admin/missions/' + row.dataset.mid, { points: $('[name=points]', row).value, daily_cap: $('[name=cap]', row).value || null, active: $('[name=active]', row).checked });
+      await api('PUT', '/admin/missions/' + r.dataset.mid, {
+        points: $('[name=points]', r).value, daily_cap: $('[name=cap]', r).value || null,
+        active: $('[name=active]', r).checked, needs_approval: $('[name=approval]', r).checked,
+      });
       toast(t('saved'));
     } catch (err) { toast(errText(err), true); }
   };
@@ -1085,19 +1209,6 @@ async function leadWorlds(box) {
   };
 }
 
-async function leadCards(box) {
-  const d = await api('GET', '/admin/settings');
-  const cards = d.missions.filter((m) => m.kind === 'card');
-  box.innerHTML = `<div class="panel"><h2>🃏 ${t('lead_cards')}</h2><p class="hint">${t('card_hint')}</p><div class="mission-list">${cards.map((c) => `<div class="mission" style="cursor:default">
-    <span class="ico cat-card">🃏</span><span class="body"><span class="name">${esc(tr(c, 'name'))}</span><span class="meta"><span>${esc(tr(c, 'freq'))}</span><span>+${c.points} · ${t('scope_' + (c.reward_scope || 'bonus'))}</span></span></span>
-    ${c.revealed_at ? `<span class="tag">✔ ${t('revealed')}</span>` : `<button class="btn small gold" data-reveal="${c.id}">${t('reveal')}</button>`}</div>`).join('')}</div></div>`;
-  box.onclick = async (e) => {
-    const b = e.target.closest('[data-reveal]');
-    if (!b || !(await ask(t('reveal') + '?'))) return;
-    try { await api('POST', `/admin/cards/${b.dataset.reveal}/reveal`, {}); toast(t('revealed')); leadCards(box); } catch (err) { toast(errText(err), true); }
-  };
-}
-
 async function leadUsers(box) {
   const users = await api('GET', '/admin/users');
   box.innerHTML = `<div class="panel"><h2>${t('lead_users')} (${users.length})</h2><div class="table-scroll"><table class="simple"><tbody>
@@ -1129,36 +1240,21 @@ async function leadUsers(box) {
 }
 
 async function leadFix(box) {
-  const [claims, users, worlds] = await Promise.all([api('GET', '/admin/claims?status=approved'), api('GET', '/admin/users'), api('GET', '/worlds')]);
+  const [users, worlds] = await Promise.all([api('GET', '/admin/users'), api('GET', '/worlds')]);
   box.innerHTML = `<div class="panel"><h2>${t('adjust')}</h2><form id="af">
       <label class="field"><span>${t('adjust_target')}</span><select name="target">
         <optgroup label="${t('lead_users')}">${users.map((u) => `<option value="u:${u.id}">${esc(u.alias)}</option>`).join('')}</optgroup>
         <optgroup label="${t('lead_worlds')}">${worlds.map((p) => `<option value="w:${p.world.id}">${esc(tr(p.world, 'name'))} (⭐)</option>`).join('')}</optgroup></select></label>
       <label class="field"><span>${t('amount')}</span><input type="number" name="amount" required></label>
       <label class="field"><span>${t('reason')}</span><input type="text" name="reason" required maxlength="300"></label>
-      <button class="btn green">${t('apply')}</button></form></div>
-    <div class="panel"><h2>${t('lead_fix')}</h2><p class="hint">${t('void_hint')}</p>
-      ${claims.map((c) => `<div class="claim" data-cid="${c.id}"><div class="top"><div><div class="name">#${c.id} ${esc(c.mission)} ×${c.quantity}</div>
-        <div class="sub">${esc(c.user.alias)} · ${fmtDate(c.performed_at)} · ${c.world_id}</div></div><button class="btn small primary" data-void>${t('void')}</button></div></div>`).join('') || '—'}</div>`;
-  $('#af').onsubmit = async (e) => {
+      <button class="btn green">${t('apply')}</button></form></div>`;
+  $('#af', box).onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const [kind, id] = String(fd.get('target')).split(':');
     try {
       await api('POST', '/admin/adjust', { user_id: kind === 'u' ? Number(id) : null, world_id: kind === 'w' ? id : null, amount: fd.get('amount'), reason: fd.get('reason') });
       e.target.reset(); toast(t('saved'));
-    } catch (err) { toast(errText(err), true); }
-  };
-  box.onclick = async (e) => {
-    const b = e.target.closest('[data-void]');
-    if (!b) return;
-    const id = b.closest('[data-cid]').dataset.cid;
-    const reason = await ask(t('void') + ' #' + id, { input: true, placeholder: t('reason_ph'), danger: true, okLabel: t('void') });
-    if (!reason) return;
-    try {
-      const r = await api('POST', `/admin/claims/${id}/void`, { reason });
-      toast(r.unlocked_world_affected ? t('unlocked_world_warning') : t('saved'), r.unlocked_world_affected);
-      leadFix(box);
     } catch (err) { toast(errText(err), true); }
   };
 }

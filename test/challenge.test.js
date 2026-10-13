@@ -145,20 +145,16 @@ test('Garden needs 3 approved fruits from the whole group; City needs one that k
   const { db, users, coord } = setup(['brother', 'sister']);
   db.prepare("UPDATE worlds SET status = 'unlocked' WHERE ord < 5").run();
   db.prepare("UPDATE worlds SET status = 'active', star_target = 0 WHERE id = 'W05'").run();
-  const baptize = (u) => {
-    const c = E.createContact(db, u.id);
-    E.approveClaim(db, coord, E.createClaim(db, u, { mission_def_id: 'PRE04', contact_id: c.id, idempotency_key: 'k' + Math.random() }).claim.id);
-    return c;
-  };
-  const first = baptize(users[0]);
-  baptize(users[1]);
+  const report = (u, def) => E.approveClaim(db, coord, E.createClaim(db, u, { mission_def_id: def, idempotency_key: 'k' + Math.random() }).claim.id);
+  report(users[0], 'PRE04');
+  report(users[1], 'PRE04');
   assert.equal(E.worldProgress(db, 'W05').eligible, false);
-  baptize(users[1]);
+  report(users[1], 'PRE04');
   assert.equal(E.worldProgress(db, 'W05').challenge.count, 3);
   assert.equal(E.unlockWorld(db, coord, 'W05').next, 'W06');
   db.prepare("UPDATE worlds SET star_target = 0 WHERE id = 'W06'").run();
   assert.equal(E.worldProgress(db, 'W06').eligible, false);
-  E.approveClaim(db, coord, E.createClaim(db, users[0], { mission_def_id: 'PRE05', contact_id: first.id, idempotency_key: 'k' + Math.random() }).claim.id);
+  report(users[0], 'PRE05');
   assert.equal(E.worldProgress(db, 'W06').eligible, true);
 });
 

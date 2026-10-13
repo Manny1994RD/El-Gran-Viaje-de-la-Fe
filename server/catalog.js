@@ -18,10 +18,7 @@ export const SETTINGS = {
 
 export const SETTING_TYPES = {
   season_name: 'text', season_start: 'date', season_end: 'date',
-  group_target_size: 'integer', max_personal_base_weekly: 'integer',
-  max_personal_bonus_weekly: 'integer', self_report_review: 'enum:pending,auto',
-  baptism_milestone_additive: 'integer', keeping_service_extra: 'integer',
-  class_ability_bonus: 'integer', challenge_xp: 'integer', season_frozen: 'bool',
+  group_target_size: 'integer', challenge_xp: 'integer', season_frozen: 'bool',
 };
 
 // tag: tag that counts toward the world's special missions and obstacle.
@@ -100,6 +97,24 @@ export const CHALLENGES = {
     en: 'The whole group: the fruits keep service (at least 1).' },
 };
 
+// The missions members see (4 groups). Others stay in the database, switched off, for history.
+// approval: true = waits for a coordinator; everything else counts right away.
+export const ACTIVE_MISSIONS = {
+  PRE01: { freq_es: '1 estrella por cada persona', freq_en: '1 star per person' },
+  PRE03: { freq_es: 'por cada estudio', freq_en: 'per study' },
+  PRE04: { approval: true, freq_es: 'por cada bautismo · lo aprueba un coordinador', freq_en: 'per baptism · approved by a coordinator' },
+  PRE05: { approval: true, freq_es: 'cuando un fruto guarda servicio · lo aprueba un coordinador', freq_en: 'when a fruit keeps worship · approved by a coordinator' },
+  EDU01: { approval: true, freq_es: 'curso completo · lo aprueba un coordinador', freq_en: 'whole course · approved by a coordinator' },
+  EDU02: { approval: true, freq_es: 'por firma · lo aprueba un coordinador', freq_en: 'per signature · approved by a coordinator' },
+  EDU03: { approval: true, freq_es: 'por firma · lo aprueba un coordinador', freq_en: 'per signature · approved by a coordinator' },
+  AP03: { freq_es: '1 vez al día', freq_en: 'once a day' },
+  AP04: { freq_es: '1 vez al día', freq_en: 'once a day' },
+  AP06: { freq_es: '1 vez al día', freq_en: 'once a day' },
+  SER01: { freq_es: '1 vez al día', freq_en: 'once a day' },
+  SER02: { freq_es: '1 vez al día', freq_en: 'once a day' },
+  SER04: { freq_es: '1 vez al día', freq_en: 'once a day' },
+};
+
 export const MISSIONS = [
   m('PRE01', 'preaching', 'Predicación simple', 'Simple preaching', 1, ['preaching_followup'], null, 'por persona distinta alcanzada', 'per different person reached'),
   m('PRE02', 'preaching', 'Predicación significativa', 'Meaningful preaching', 5, ['preaching_followup'], 1, 'por hito (adicional a la simple)', 'per milestone (on top of simple)', { contact: 'pre02' }),
@@ -172,10 +187,10 @@ export const CLASSES = [
 export const LEVELS = [
   { level: 1, min_xp: 0, title_es: 'Explorador', title_en: 'Explorer', prize_es: 'Brújula de inicio', prize_en: 'Starter compass', cosmetic: 'compass' },
   { level: 2, min_xp: 50, title_es: 'Caminante', title_en: 'Walker', prize_es: 'Insignia del Camino', prize_en: 'Path badge', cosmetic: 'badge' },
-  { level: 3, min_xp: 100, title_es: 'Guardia de la Luz', title_en: 'Guard of Light', prize_es: 'Marco luminoso', prize_en: 'Glowing frame', cosmetic: 'frame' },
-  { level: 4, min_xp: 175, title_es: 'Viajero Valiente', title_en: 'Brave Traveler', prize_es: 'Efecto de personaje', prize_en: 'Character aura', cosmetic: 'aura' },
-  { level: 5, min_xp: 250, title_es: 'Guardián del Camino', title_en: 'Guardian of the Path', prize_es: 'Título especial', prize_en: 'Special title', cosmetic: 'title' },
-  { level: 6, min_xp: 350, title_es: 'Héroe de la Unidad', title_en: 'Hero of Unity', prize_es: 'Corona de unidad', prize_en: 'Unity crown', cosmetic: 'crown' },
+  { level: 3, min_xp: 150, title_es: 'Guardia de la Luz', title_en: 'Guard of Light', prize_es: 'Marco luminoso', prize_en: 'Glowing frame', cosmetic: 'frame' },
+  { level: 4, min_xp: 300, title_es: 'Viajero Valiente', title_en: 'Brave Traveler', prize_es: 'Efecto de personaje', prize_en: 'Character aura', cosmetic: 'aura' },
+  { level: 5, min_xp: 500, title_es: 'Guardián del Camino', title_en: 'Guardian of the Path', prize_es: 'Título especial', prize_en: 'Special title', cosmetic: 'title' },
+  { level: 6, min_xp: 750, title_es: 'Héroe de la Unidad', title_en: 'Hero of Unity', prize_es: 'Corona de unidad', prize_en: 'Unity crown', cosmetic: 'crown' },
 ];
 
 export const levelFor = (xp) => LEVELS.reduce((acc, l) => (xp >= l.min_xp ? l : acc), LEVELS[0]);

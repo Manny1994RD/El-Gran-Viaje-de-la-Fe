@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { SETTINGS, WORLDS, MISSIONS, CLASSES, CHALLENGES } from './catalog.js';
+import { SETTINGS, WORLDS, MISSIONS, CLASSES, CHALLENGES, ACTIVE_MISSIONS } from './catalog.js';
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -139,6 +139,16 @@ function migrate(db) {
       upd.run(c.type, JSON.stringify(cfg), c.es, c.en, c.stars, id);
     }
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')").run();
+  }
+  if (version < 3) {
+    // Revamp: a short mission list; only milestones need a coordinator; no guest codes.
+    if (!hasColumn(db, 'mission_defs', 'needs_approval')) db.exec('ALTER TABLE mission_defs ADD COLUMN needs_approval INTEGER NOT NULL DEFAULT 0');
+    const keep = Object.keys(ACTIVE_MISSIONS);
+    db.prepare(`UPDATE mission_defs SET active = CASE WHEN id IN (${keep.map(() => '?').join(',')}) THEN 1 ELSE 0 END`).run(...keep);
+    const upd = db.prepare('UPDATE mission_defs SET needs_approval = ?, freq_es = ?, freq_en = ? WHERE id = ?');
+    for (const [id, m] of Object.entries(ACTIVE_MISSIONS)) upd.run(m.approval ? 1 : 0, m.freq_es, m.freq_en, id);
+    db.exec("UPDATE mission_defs SET contact = 'none', daily_cap = NULL WHERE id IN ('PRE04','PRE05')");
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '3')").run();
   }
 }
 

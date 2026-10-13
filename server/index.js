@@ -108,13 +108,12 @@ function claimView(c, lang) {
   const def = E.getDef(db, c.def_id);
   const parts = db.prepare('SELECT u.id, u.alias FROM claim_participants p JOIN users u ON u.id = p.user_id WHERE p.claim_id = ?').all(c.id);
   const owner = db.prepare('SELECT alias FROM users WHERE id = ?').get(c.user_id);
-  const contact = c.contact_id ? db.prepare('SELECT token FROM anonymous_contacts WHERE id = ?').get(c.contact_id) : null;
   return {
     id: c.id, def_id: c.def_id, mission: def[`name_${lang}`] || def.name_es, category: def.category, kind: def.kind,
     world_id: c.world_id, quantity: c.quantity, points_per_unit: c.points_per_unit, status: c.status,
     performed_at: c.performed_at, note: c.note, use_ability: !!c.use_ability, coord_message: c.coord_message,
     result: c.result_json ? JSON.parse(c.result_json) : null, created_at: c.created_at,
-    user: { id: c.user_id, alias: owner?.alias }, participants: parts, contact: contact?.token ?? null, contact_id: c.contact_id,
+    user: { id: c.user_id, alias: owner?.alias }, participants: parts,
   };
 }
 
@@ -164,7 +163,6 @@ route('GET', '/api/bootstrap', ({ user }) => {
   return {
     me: pubUser(user), character: user ? characterOf(user.id) : null,
     settings: { season_name: s.season_name, season_start: s.season_start, season_end: s.season_end, season_frozen: s.season_frozen },
-    caps: { base: s.max_personal_base_weekly, bonus: s.max_personal_bonus_weekly },
     classes: db.prepare('SELECT * FROM classes WHERE active = 1').all(),
     levels: LEVELS,
   };
@@ -262,17 +260,13 @@ route('GET', '/api/worlds/:id', ({ user, params }) => { need(user); return E.wor
 
 route('GET', '/api/missions', ({ user }) => {
   need(user);
-  const rows = db.prepare("SELECT * FROM mission_defs WHERE active = 1 AND (kind != 'card' OR revealed_at IS NOT NULL) ORDER BY rowid").all();
-  const doneCards = new Set(db.prepare(`SELECT def_id FROM claims WHERE status IN ('pending','approved','needs_changes')
-      AND (user_id = ? OR id IN (SELECT claim_id FROM claim_participants WHERE user_id = ?))`).all(user.id, user.id).map((r) => r.def_id));
+  const rows = db.prepare("SELECT * FROM mission_defs WHERE active = 1 ORDER BY rowid").all();
   const today = E.today();
   const usedToday = Object.fromEntries(db.prepare(`SELECT def_id, SUM(quantity) q FROM claims WHERE user_id = ? AND performed_at = ?
       AND status IN ('pending','approved','needs_changes') GROUP BY def_id`).all(user.id, today).map((r) => [r.def_id, r.q]));
-  return rows.map((r) => ({ ...E.parseDef(r), done: r.kind === 'card' && doneCards.has(r.id), used_today: usedToday[r.id] || 0 }));
+  return rows.map((r) => ({ ...E.parseDef(r), used_today: usedToday[r.id] || 0 }));
 });
 
-route('GET', '/api/contacts', ({ user }) => E.listContacts(db, need(user).id));
-route('POST', '/api/contacts', ({ user }) => E.createContact(db, need(user).id));
 
 route('POST', '/api/claims', ({ user, body, lang }) => {
   need(user);
@@ -294,6 +288,7 @@ route('GET', '/api/news', ({ user }) => {
 });
 
 route('GET', '/api/group', ({ user }) => { need(user); return E.groupStats(db); });
+route('GET', '/api/feed', ({ user }) => { need(user); return E.groupFeed(db, 12); });
 
 // Members who joined before brothers/sisters existed set it once; after that only an admin changes it.
 route('POST', '/api/me/gender', ({ user, body }) => {
@@ -419,29 +414,17 @@ route('PUT', '/api/admin/missions/:id', ({ user, body, params }) => {
     const points = body.points == null ? d.points : Number.parseInt(body.points, 10);
     if (!Number.isInteger(points) || points < 0 || points > 1000) fail('bad_setting');
     const active = body.active == null ? d.active : (body.active ? 1 : 0);
+    const approval = body.needs_approval == null ? d.needs_approval : (body.needs_approval ? 1 : 0);
     let cap = d.daily_cap;
     if (body.daily_cap !== undefined) {
       cap = body.daily_cap === null || body.daily_cap === '' ? null : Number.parseInt(body.daily_cap, 10);
       if (cap !== null && (!Number.isInteger(cap) || cap < 1 || cap > 100)) fail('bad_setting');
     }
-    db.prepare('UPDATE mission_defs SET points = ?, active = ?, daily_cap = ?, version = version + 1 WHERE id = ?').run(points, active, cap, d.id);
-    const change = { points: [d.points, points], active: [d.active, active], daily_cap: [d.daily_cap, cap] };
+    db.prepare('UPDATE mission_defs SET points = ?, active = ?, daily_cap = ?, needs_approval = ?, version = version + 1 WHERE id = ?').run(points, active, cap, approval, d.id);
+    const change = { points: [d.points, points], active: [d.active, active], daily_cap: [d.daily_cap, cap], needs_approval: [d.needs_approval, approval] };
     bumpVersion(user, { mission: d.id, ...change });
     audit(db, user.id, 'mission_def', d.id, 'update', { points: d.points, active: d.active, daily_cap: d.daily_cap }, { points, active, daily_cap: cap });
     return E.getDef(db, d.id);
-  });
-});
-
-route('POST', '/api/admin/cards/:id/reveal', ({ user, params }) => {
-  need(user, 'admin');
-  return tx(db, () => {
-    const d = db.prepare("SELECT * FROM mission_defs WHERE id = ? AND kind = 'card'").get(params.id);
-    if (!d) fail('not_found', 404);
-    if (d.revealed_at) return { ok: true };
-    db.prepare("UPDATE mission_defs SET revealed_at = datetime('now') WHERE id = ?").run(d.id);
-    db.prepare('INSERT INTO news (title, body, card_id, actor_id) VALUES (?, ?, ?, ?)').run(`🃏 ${d.name_es} / ${d.name_en}`, `${d.freq_es} · ${d.freq_en}`, d.id, user.id);
-    audit(db, user.id, 'card', d.id, 'reveal', null, null);
-    return { ok: true };
   });
 });
 
@@ -506,7 +489,7 @@ route('POST', '/api/admin/users/:id/pin', ({ user, body, params }) => {
 });
 
 route('GET', '/api/admin/claims', ({ user, query, lang }) => {
-  need(user, 'admin');
+  need(user, 'coordinator');
   const status = query.get('status');
   const rows = status
     ? db.prepare('SELECT * FROM claims WHERE status = ? ORDER BY id DESC LIMIT 300').all(status)
@@ -514,7 +497,7 @@ route('GET', '/api/admin/claims', ({ user, query, lang }) => {
   return rows.map((c) => claimView(c, lang));
 });
 route('POST', '/api/admin/claims/:id/void', ({ user, body, params, lang }) => {
-  const r = E.voidClaim(db, need(user, 'admin'), Number(params.id), body.reason);
+  const r = E.voidClaim(db, need(user, 'coordinator'), Number(params.id), body.reason);
   return { claim: claimView(r.claim, lang), unlocked_world_affected: r.unlocked_world_affected };
 });
 route('POST', '/api/admin/adjust', ({ user, body }) => E.adjustPoints(db, need(user, 'admin'), body));
@@ -527,7 +510,7 @@ route('GET', '/api/admin/audit', ({ user }) => {
 const EXPORTS = {
   claims: `SELECT c.id, u.alias, c.def_id, c.world_id, c.quantity, c.points_per_unit, c.status, c.performed_at, c.use_ability,
       (SELECT group_concat(pu.alias, ' ') FROM claim_participants p JOIN users pu ON pu.id = p.user_id WHERE p.claim_id = c.id) participants,
-      (SELECT token FROM anonymous_contacts a WHERE a.id = c.contact_id) contact, c.rule_version, c.created_at
+      c.rule_version, c.created_at
       FROM claims c JOIN users u ON u.id = c.user_id ORDER BY c.id`,
   ledger: `SELECT l.id, u.alias, l.claim_id, l.world_id, l.amount, l.scope, l.kind, l.week, l.rule_version, l.note, l.at
       FROM ledger l LEFT JOIN users u ON u.id = l.user_id ORDER BY l.id`,
