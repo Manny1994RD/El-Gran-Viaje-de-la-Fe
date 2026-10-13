@@ -982,17 +982,18 @@ async function meView() {
 }
 
 // ---------- leader: Aprobar · Grupo · Ajustes ----------
-const LEAD_TABS = { approve: 'lead_approve', group: 'lead_group', setup: 'lead_setup' };
+const LEAD_TABS = { approve: 'lead_approve', group: 'lead_group', results: 'lead_results', setup: 'lead_setup' };
 
 async function lead({ args }) {
   if (!isCoord()) return go('home');
-  const tabs = isAdmin() ? ['approve', 'group', 'setup'] : ['approve', 'group'];
+  const tabs = isAdmin() ? ['approve', 'group', 'results', 'setup'] : ['approve', 'group', 'results'];
   const tab = tabs.includes(args[0]) ? args[0] : 'approve';
   app.innerHTML = `<div class="seg">${tabs.map((k) => `<a class="${k === tab ? 'on' : ''}" href="#/lead/${k}">${t(LEAD_TABS[k])}${k === 'approve' && pendingCount ? ` <b class="dot-inline">${pendingCount}</b>` : ''}</a>`).join('')}</div><div id="lead"></div>`;
   const box = $('#lead');
   const parts = {
     approve: [leadQueue, leadRecent],
     group: [leadPanel, leadInvites, ...(isAdmin() ? [leadUsers] : [])],
+    results: [leadResults],
     setup: [leadWorlds, leadMissions, leadSettings, leadFix, leadAudit],
   }[tab];
   // Setup sections fold away so the admin screen stays short on a phone.
@@ -1001,6 +1002,56 @@ async function lead({ args }) {
     ? `<details class="fold"><summary>${t(folds[i])}</summary><div id="lp${i}"></div></details>`
     : `<div id="lp${i}"></div>`)).join('');
   await Promise.all(parts.map((fn, i) => fn($('#lp' + i))));
+}
+
+// Leaders only: star ranking and recognitions for the end-of-season awards.
+const AWARDS = [
+  ['preached', '📣'], ['ch_preached', '🤝'], ['studies', '📖'], ['ch_contacts', '👥'], ['ch_chapters', '📚'],
+  ['fruits', '🍇'], ['keeping', '🌱'], ['signatures', '✍️'], ['courses', '🎓'], ['shepherd', '🐑'],
+  ['service', '🤲'], ['prayer', '🙏'], ['active_days', '📅'], ['team', '🫂'],
+];
+const MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
+
+async function leadResults(box) {
+  const [r, members] = await Promise.all([api('GET', '/results'), api('GET', '/members')]);
+  const byId = Object.fromEntries(members.map((m) => [m.id, m]));
+  const face = (id) => (byId[id] ? avatarSVG({ ...byId[id].look, show: {} }, { classId: byId[id].class_id, crop: 'head' }) : '');
+  // Top 3 places for one category (ties share a place); only people with something to show.
+  const top = (key) => {
+    const list = r.rows.filter((x) => x[key] > 0).sort((a, b) => b[key] - a[key] || a.alias.localeCompare(b.alias));
+    let place = 0;
+    return list.map((x, i) => ({ ...x, place: (place = i === 0 || x[key] !== list[i - 1][key] ? i + 1 : place) })).filter((x) => x.place <= 3);
+  };
+  const awards = AWARDS.map(([key, icon]) => ({ key, icon, list: top(key) })).filter((a) => a.list.length);
+  const missing = r.rows.filter((x) => !x.reports && !(x.ch_chapters + x.ch_preached + x.ch_contacts + x.ch_ga + x.ch_edulms));
+
+  box.innerHTML = `<div class="panel tight private-note">🔒 ${t('results_private')}</div>
+    <div class="panel"><h2>${t('participation')}</h2>
+      ${bar('👥 ' + t('participated'), r.participated, r.members, 'blue')}
+      <div class="stat-grid" style="margin-top:12px"><div class="stat"><b>⭐ ${r.total_stars}</b><span>${t('total_stars')}</span></div>
+        <div class="stat"><b>${r.total_reports}</b><span>${t('missions_done')}</span></div></div></div>
+    <div class="panel"><div class="panel-title"><h2>🏆 ${t('ranking')}</h2><button class="btn small" id="csv">⬇ CSV</button></div>
+      <div class="rank-list">${r.rows.map((x) => `<div class="rank-row ${x.stars ? '' : 'dim'}">
+        <span class="rank-n">${MEDAL[x.rank] || x.rank}</span><span class="feed-face">${face(x.id)}</span>
+        <div class="grow"><b>${esc(x.alias)}</b><div class="hint" style="margin:0">${t('level')} ${x.level} · ${x.active_days} ${t('days_active')} · ${x.reports} ${t('reports_n')}</div></div>
+        <span class="feed-pts">${x.stars} ⭐</span></div>`).join('')}</div></div>
+    <div class="panel"><h2>🎖️ ${t('recognitions')}</h2><p class="hint">${t('recognitions_hint')}</p>
+      <div class="award-grid">${awards.map((a) => `<div class="award"><div class="award-title">${a.icon} ${t('aw.' + a.key)}</div>
+        ${a.list.map((x) => `<div class="award-row"><span>${MEDAL[x.place]}</span><span class="grow">${esc(x.alias)}</span><b>${x[a.key]}</b></div>`).join('')}</div>`).join('') || '<p>—</p>'}</div></div>
+    ${missing.length ? `<div class="panel"><h2>🙏 ${t('not_yet')}</h2><p class="hint">${t('not_yet_hint')}</p>
+      <div class="unpaired">${missing.map((x) => `<span class="chip" style="cursor:default">${esc(x.alias)}</span>`).join('')}</div></div>` : ''}`;
+
+  $('#csv', box).onclick = () => {
+    const cols = ['rank', 'alias', 'stars', 'level', 'active_days', 'reports', ...AWARDS.map(([k]) => k).filter((k) => k !== 'active_days')];
+    const head = cols.map((c) => (c === 'rank' || c === 'alias' || c === 'stars' || c === 'level' || c === 'reports' ? c : t('aw.' + c)));
+    const cell = (v) => { const str = String(v ?? ''); return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str; };
+    const csv = '﻿' + [head.map(cell).join(','), ...r.rows.map((x) => cols.map((c) => cell(x[c])).join(','))].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `resultados-${localDate()}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
 }
 
 // Recently counted reports; a coordinator can remove a mistaken one (it is reversed, not deleted).

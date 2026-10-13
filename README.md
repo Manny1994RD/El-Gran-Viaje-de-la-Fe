@@ -19,6 +19,7 @@ Works on phones and on a big screen (projector mode). Spanish by default, with a
 **For coordinators** (Líder tab)
 - **Aprobar:** approve, send back or reject milestone reports, and remove a mistaken entry from the recent list.
 - **Grupo:** the world's progress, group statistics, notices, invitations, and (for admins) members.
+- **Resultados** (leaders only, never shown to members): participation, the star ranking of every member, the top 3 in each area for end-of-season awards (people preached to, studies, contacts, chapters read, fruits, signatures, EduLMS, feeding, service, prayer, active days, teamwork), who hasn't taken part yet, and a CSV download.
 - **Ajustes** (admins): worlds and challenges, missions (stars, daily limit, approval, on/off), rules, manual adjustments, CSV exports, backup and audit.
 
 **Projector mode:** Líder → Grupo → "Open board for projector".

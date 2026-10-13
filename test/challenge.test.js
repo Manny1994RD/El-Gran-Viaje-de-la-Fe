@@ -186,3 +186,24 @@ test('an existing version-1 database upgrades without losing data', () => {
   assert.equal(db2.prepare("SELECT challenge_type FROM worlds WHERE id = 'W01'").get().challenge_type, 'pair');
   assert.ok(new DatabaseSync(file));
 });
+
+test('leader results: ranking with shared places, categories and pair totals', async () => {
+  const { seasonResults } = await import('../server/results.js');
+  const { db, users, coord } = setup(['brother', 'brother', 'brother', 'sister']);
+  const log = (u, def, extra = {}) => E.createClaim(db, u, { mission_def_id: def, idempotency_key: 'k' + Math.random(), ...extra });
+  log(users[1], 'PRE01', { quantity: 12 });
+  log(users[2], 'PRE01', { quantity: 5, participant_ids: [users[3].id] });
+  E.approveClaim(db, coord, log(users[1], 'EDU02').claim.id);
+  const p = pairUp(db, users[1], users[2]);
+  C.addProgress(db, users[1], p.id, { item: 'chapters', amount: 4, done_at: now() });
+  const r = seasonResults(db);
+  assert.equal(r.members, 4);
+  assert.equal(r.participated, 3, 'the coordinator has not logged anything');
+  const by = Object.fromEntries(r.rows.map((x) => [x.alias, x]));
+  assert.equal(by.U1.rank, 1);
+  assert.equal(by.U1.preached, 12);
+  assert.equal(by.U1.signatures, 1);
+  assert.equal(by.U3.preached, 5, 'companions get credit');
+  assert.equal(by.U2.ch_chapters, 4, 'pair totals count for both partners');
+  assert.equal(by.U2.rank, by.U3.rank, 'equal stars share a place');
+});

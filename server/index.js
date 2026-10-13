@@ -9,6 +9,7 @@ import { openDb, getSettings, tx, audit } from './db.js';
 import { LEVELS, SETTING_TYPES } from './catalog.js';
 import * as E from './engine.js';
 import * as C from './challenge.js';
+import { seasonResults } from './results.js';
 import { validateLook, withRewards } from './look.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -367,6 +368,9 @@ route('POST', '/api/news', ({ user, body }) => {
   const r = db.prepare('INSERT INTO news (title, body, actor_id) VALUES (?, ?, ?)').run(title, text, user.id);
   return { id: Number(r.lastInsertRowid) };
 });
+
+// Leaders only: ranking and recognitions. Members never receive other people's totals.
+route('GET', '/api/results', ({ user }) => seasonResults(db, need(user, 'coordinator')));
 
 // ----- admin -----
 
