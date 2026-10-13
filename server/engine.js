@@ -4,6 +4,7 @@
 import { randomBytes } from 'node:crypto';
 import { getSettings, tx, audit } from './db.js';
 import { levelFor, LEVELS, pathsOf } from './catalog.js';
+import { challengeStatus } from './challenge.js';
 
 export class AppError extends Error {
   constructor(status, code, detail) {
@@ -367,16 +368,20 @@ export function worldProgress(db, worldId) {
     distinct = people(tagged);
   }
   const prev = db.prepare('SELECT status FROM worlds WHERE ord = ?').get(w.ord - 1);
-  const checks = {
-    stars: stars >= w.star_target,
-    obstacle: tagCount >= w.tag_target,
-    distinct: distinct >= w.distinct_min,
-    previous: !prev || prev.status === 'unlocked',
-  };
+  // Worlds with a challenge open with stars + challenge; the older obstacle rules apply otherwise.
+  const challenge = challengeStatus(db, w);
+  const checks = challenge
+    ? { stars: stars >= w.star_target, challenge: challenge.complete, previous: !prev || prev.status === 'unlocked' }
+    : {
+      stars: stars >= w.star_target,
+      obstacle: tagCount >= w.tag_target,
+      distinct: distinct >= w.distinct_min,
+      previous: !prev || prev.status === 'unlocked',
+    };
   const eligible = w.status === 'active' && Object.values(checks).every(Boolean);
   const pending = db.prepare("SELECT COUNT(*) n FROM claims WHERE world_id = ? AND status = 'pending'").get(worldId).n;
   return { world: w, stars, tag_count: tagCount, distinct, paths, checks, eligible, pending_claims: pending,
-    approved_claims: claims.length };
+    approved_claims: claims.length, challenge };
 }
 
 export function unlockWorld(db, actor, worldId) {
@@ -384,7 +389,7 @@ export function unlockWorld(db, actor, worldId) {
     const p = worldProgress(db, worldId);
     if (p.world.status === 'unlocked') fail('already_unlocked');
     if (!p.eligible) fail('not_eligible', p.checks);
-    const snapshot = JSON.stringify({ stars: p.stars, tag_count: p.tag_count, distinct: p.distinct, paths: p.paths, at: new Date().toISOString() });
+    const snapshot = JSON.stringify({ stars: p.stars, tag_count: p.tag_count, distinct: p.distinct, paths: p.paths, challenge: p.challenge, at: new Date().toISOString() });
     db.prepare('INSERT INTO world_unlocks (world_id, confirmed_by, snapshot) VALUES (?, ?, ?)').run(worldId, actor.id, snapshot);
     db.prepare("UPDATE worlds SET status = 'unlocked', unlocked_at = datetime('now') WHERE id = ?").run(worldId);
     const next = db.prepare('SELECT * FROM worlds WHERE ord = ?').get(p.world.ord + 1);

@@ -80,9 +80,9 @@ test('T08 team mission: points for each participant, one event for the world', (
   assert.equal(p.distinct, 3);
 });
 
-test('T09/T11 unlock needs every requirement and then a coordinator confirmation', () => {
+test('T09/T11 (obstacle rules) unlock needs every requirement and then a coordinator confirmation', () => {
   const { db, users, coord } = setup(3);
-  db.prepare("UPDATE worlds SET star_target = 20 WHERE id = 'W01'").run();
+  db.prepare("UPDATE worlds SET star_target = 20, challenge_type = NULL WHERE id = 'W01'").run();
   approve(db, coord, claim(db, users[1], 'PRE01', { quantity: 25 }));
   let p = E.worldProgress(db, 'W01');
   assert.equal(p.checks.stars, true);
@@ -186,10 +186,10 @@ test('T21 admin void appends offsetting entries and keeps history', () => {
   assert.equal(db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action = 'void'").get().n, 1);
 });
 
-test('T22 final world needs all five paths and 3 people', () => {
+test('T22 (obstacle rules) final world needs all five paths and 3 people', () => {
   const { db, users, coord } = setup(4);
   db.prepare("UPDATE worlds SET status = 'unlocked' WHERE ord < 6").run();
-  db.prepare("UPDATE worlds SET status = 'active' WHERE id = 'W06'").run();
+  db.prepare("UPDATE worlds SET status = 'active', star_target = 0, challenge_type = NULL WHERE id = 'W06'").run();
   approve(db, coord, claim(db, users[1], 'EDU02'));
   approve(db, coord, claim(db, users[2], 'SER06'));
   approve(db, coord, claim(db, users[3], 'PRE01'));

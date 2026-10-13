@@ -12,6 +12,7 @@ export const SETTINGS = {
   baptism_milestone_additive: 50,
   keeping_service_extra: 100,
   class_ability_bonus: 5,
+  challenge_xp: 15,
   season_frozen: false,
 };
 
@@ -20,7 +21,7 @@ export const SETTING_TYPES = {
   group_target_size: 'integer', max_personal_base_weekly: 'integer',
   max_personal_bonus_weekly: 'integer', self_report_review: 'enum:pending,auto',
   baptism_milestone_additive: 'integer', keeping_service_extra: 'integer',
-  class_ability_bonus: 'integer', season_frozen: 'bool',
+  class_ability_bonus: 'integer', challenge_xp: 'integer', season_frozen: 'bool',
 };
 
 // tag: tag that counts toward the world's special missions and obstacle.
@@ -69,6 +70,35 @@ export const WORLDS = [
 // confirm: a checkbox the member must tick (e.g. whole EduLMS course finished)
 const m = (id, category, name_es, name_en, points, tags, daily_cap, freq_es, freq_en, extra = {}) =>
   ({ id, category, name_es, name_en, points, tags, daily_cap, freq_es, freq_en, kind: 'base', min_participants: 1, contact: 'none', confirm: 0, exempt_cap: 0, ...extra });
+
+// World challenges (replace the blueprint obstacles). type 'pair': every member works with a
+// same-gender partner (new partner each world) and each pair must reach every item target.
+// type 'fruit' / 'keeping': one goal for the whole group, counted from approved PRE04 / PRE05.
+// Star targets are sized for about 18 members; admins can change both in Líder → Mundos.
+export const CHALLENGES = {
+  W01: { stars: 500, type: 'pair',
+    es: 'Con tu pareja: lean juntos 5 capítulos de «Jactémonos de Dios».',
+    en: 'With your partner: read 5 chapters of "Boast About God" together.',
+    items: [{ key: 'chapters', target: 5, es: 'Capítulos leídos', en: 'Chapters read' }] },
+  W02: { stars: 700, type: 'pair',
+    es: 'Con tu pareja: consigan 1 firma de GA y aprueben 1 curso de EduLMS.',
+    en: 'With your partner: get 1 GA signature and pass 1 EduLMS course.',
+    items: [{ key: 'ga', target: 1, es: 'Firma de GA', en: 'GA signature' }, { key: 'edulms', target: 1, es: 'Curso EduLMS aprobado', en: 'EduLMS course passed' }] },
+  W03: { stars: 900, type: 'pair',
+    es: 'Con tu pareja: prediquen a un total de 25 personas.',
+    en: 'With your partner: preach to a total of 25 people.',
+    items: [{ key: 'preached', target: 25, es: 'Personas predicadas', en: 'People preached to' }] },
+  W04: { stars: 1100, type: 'pair',
+    es: 'Con tu pareja: traigan un total de 5 contactos.',
+    en: 'With your partner: bring a total of 5 contacts.',
+    items: [{ key: 'contacts', target: 5, es: 'Contactos traídos', en: 'Contacts brought' }] },
+  W05: { stars: 1300, type: 'fruit', target: 3,
+    es: 'Todo el grupo: traigan 3 frutos (bautismos) en total.',
+    en: 'The whole group: bring 3 fruits (baptisms) in total.' },
+  W06: { stars: 1500, type: 'keeping', target: 1,
+    es: 'Todo el grupo: que los frutos guarden servicio (al menos 1).',
+    en: 'The whole group: the fruits keep service (at least 1).' },
+};
 
 export const MISSIONS = [
   m('PRE01', 'preaching', 'Predicación simple', 'Simple preaching', 1, ['preaching_followup'], null, 'por persona distinta alcanzada', 'per different person reached'),

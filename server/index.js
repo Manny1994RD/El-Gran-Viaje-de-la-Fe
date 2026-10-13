@@ -8,6 +8,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { openDb, getSettings, tx, audit } from './db.js';
 import { LEVELS, SETTING_TYPES } from './catalog.js';
 import * as E from './engine.js';
+import * as C from './challenge.js';
 import { validateLook, withRewards } from './look.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -93,7 +94,8 @@ function ensureSetupInvite() {
 
 // ---------- view helpers ----------
 
-const pubUser = (u) => u && { id: u.id, alias: u.alias, role: u.role, lang: u.lang };
+const pubUser = (u) => u && { id: u.id, alias: u.alias, role: u.role, lang: u.lang, gender: u.gender ?? null };
+const GENDERS = ['brother', 'sister'];
 
 const xpOf = (userId) => db.prepare("SELECT COALESCE(SUM(amount),0) n FROM ledger WHERE scope = 'xp' AND user_id = ?").get(userId).n;
 
@@ -174,13 +176,14 @@ route('POST', '/api/auth/redeem', ({ body, req, res }) => {
   if (!body.consent) fail('consent_required');
   if (!validAlias(body.alias)) fail('bad_alias');
   if (!validPin(body.pin)) fail('bad_pin');
+  if (!GENDERS.includes(body.gender)) fail('gender_missing');
   const lang = body.lang === 'en' ? 'en' : 'es';
   const user = tx(db, () => {
     const inv = db.prepare('SELECT * FROM invites WHERE code = ?').get(code);
     if (!inv || inv.uses_left < 1 || (inv.expires_at && inv.expires_at < new Date().toISOString())) fail('bad_code');
     if (db.prepare('SELECT 1 FROM users WHERE alias = ?').get(body.alias.trim())) fail('alias_taken');
-    const r = db.prepare("INSERT INTO users (alias, pin_hash, role, lang, consent_at) VALUES (?, ?, ?, ?, datetime('now'))")
-      .run(body.alias.trim(), hashPin(body.pin), inv.role, lang);
+    const r = db.prepare("INSERT INTO users (alias, pin_hash, role, lang, gender, consent_at) VALUES (?, ?, ?, ?, ?, datetime('now'))")
+      .run(body.alias.trim(), hashPin(body.pin), inv.role, lang, body.gender);
     db.prepare('UPDATE invites SET uses_left = uses_left - 1 WHERE code = ?').run(code);
     audit(db, Number(r.lastInsertRowid), 'user', Number(r.lastInsertRowid), 'join', null, { role: inv.role, invite: code });
     return db.prepare('SELECT * FROM users WHERE id = ?').get(r.lastInsertRowid);
@@ -291,6 +294,30 @@ route('GET', '/api/news', ({ user }) => {
 });
 
 route('GET', '/api/group', ({ user }) => { need(user); return E.groupStats(db); });
+
+// Members who joined before brothers/sisters existed set it once; after that only an admin changes it.
+route('POST', '/api/me/gender', ({ user, body }) => {
+  need(user);
+  if (!GENDERS.includes(body.gender)) fail('gender_missing');
+  if (user.gender) fail('forbidden', 403);
+  db.prepare('UPDATE users SET gender = ? WHERE id = ?').run(body.gender, user.id);
+  return { ok: true };
+});
+
+// ----- world challenges -----
+
+route('GET', '/api/challenge/:world', ({ user, params }) => C.board(db, params.world, need(user)));
+route('POST', '/api/challenge/:world/request', ({ user, params, body }) => C.requestPartner(db, need(user), params.world, body.partner_id));
+route('POST', '/api/pairs/:id/respond', ({ user, params, body }) => C.respondPartner(db, need(user), Number(params.id), !!body.accept));
+route('POST', '/api/pairs/:id/progress', ({ user, params, body }) => C.addProgress(db, need(user), Number(params.id), body));
+route('DELETE', '/api/progress/:id', ({ user, params }) => C.removeProgress(db, need(user), Number(params.id)));
+route('POST', '/api/pairs/:id/support', ({ user, params, body }) => C.setSupport(db, need(user), Number(params.id), !!body.on));
+route('POST', '/api/pairs/:id/pray', ({ user, params }) => C.togglePrayer(db, need(user), Number(params.id)));
+route('POST', '/api/challenge/:world/pairs', ({ user, params, body }) => C.coordCreatePair(db, need(user, 'coordinator'), params.world, body.ids));
+route('POST', '/api/pairs/:id/add', ({ user, params, body }) => C.coordAddToPair(db, need(user, 'coordinator'), Number(params.id), body.user_id));
+route('DELETE', '/api/pairs/:id', ({ user, params }) => C.coordDissolvePair(db, need(user, 'coordinator'), Number(params.id)));
+route('POST', '/api/challenge/:world/excuse', ({ user, params, body }) =>
+  C.setExcused(db, need(user, 'coordinator'), params.world, body.user_id, !!body.excused, body.reason));
 
 // ----- coordinator -----
 
@@ -431,6 +458,17 @@ route('PUT', '/api/admin/worlds/:id', ({ user, body, params }) => {
       next[k] = n;
     }
     db.prepare('UPDATE worlds SET star_target = ?, tag_target = ?, distinct_min = ? WHERE id = ?').run(next.star_target, next.tag_target, next.distinct_min, w.id);
+    const ch = C.challengeOf(w);
+    if (ch) {
+      const cfg = JSON.parse(w.challenge_json || '{}');
+      const num = (v) => { const n = Number.parseInt(v, 10); if (!Number.isInteger(n) || n < 1 || n > 10000) fail('bad_setting'); return n; };
+      if (cfg.items) for (const it of cfg.items) if (body.items?.[it.key] != null) it.target = num(body.items[it.key]);
+      if (cfg.target != null && body.challenge_target != null) cfg.target = num(body.challenge_target);
+      const es = body.challenge_es == null ? w.challenge_es : String(body.challenge_es).trim().slice(0, 300);
+      const en = body.challenge_en == null ? w.challenge_en : String(body.challenge_en).trim().slice(0, 300);
+      db.prepare('UPDATE worlds SET challenge_json = ?, challenge_es = ?, challenge_en = ? WHERE id = ?').run(JSON.stringify(cfg), es, en, w.id);
+      next.challenge = { ...cfg, es, en };
+    }
     bumpVersion(user, { world: w.id, ...next });
     audit(db, user.id, 'world', w.id, 'targets', { star_target: w.star_target, tag_target: w.tag_target, distinct_min: w.distinct_min }, next);
     return E.worldProgress(db, w.id);
@@ -439,7 +477,7 @@ route('PUT', '/api/admin/worlds/:id', ({ user, body, params }) => {
 
 route('GET', '/api/admin/users', ({ user }) => {
   need(user, 'admin');
-  return db.prepare(`SELECT u.id, u.alias, u.role, u.status, u.joined_at, c.class_id,
+  return db.prepare(`SELECT u.id, u.alias, u.role, u.status, u.gender, u.joined_at, c.class_id,
       (SELECT COALESCE(SUM(amount),0) FROM ledger l WHERE l.user_id = u.id AND l.scope = 'xp') xp
       FROM users u LEFT JOIN characters c ON c.user_id = u.id ORDER BY u.alias COLLATE NOCASE`).all();
 });
@@ -450,10 +488,11 @@ route('PUT', '/api/admin/users/:id', ({ user, body, params }) => {
   if (!u) fail('not_found', 404);
   const role = body.role && RANK[body.role] ? body.role : u.role;
   const status = ['active', 'disabled'].includes(body.status) ? body.status : u.status;
+  const gender = GENDERS.includes(body.gender) ? body.gender : u.gender;
   if (id === user.id && (role !== 'admin' || status !== 'active')) fail('cannot_demote_self');
-  db.prepare('UPDATE users SET role = ?, status = ? WHERE id = ?').run(role, status, id);
+  db.prepare('UPDATE users SET role = ?, status = ?, gender = ? WHERE id = ?').run(role, status, gender, id);
   if (status === 'disabled') db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
-  audit(db, user.id, 'user', id, 'update', { role: u.role, status: u.status }, { role, status });
+  audit(db, user.id, 'user', id, 'update', { role: u.role, status: u.status, gender: u.gender }, { role, status, gender });
   return { ok: true };
 });
 route('POST', '/api/admin/users/:id/pin', ({ user, body, params }) => {

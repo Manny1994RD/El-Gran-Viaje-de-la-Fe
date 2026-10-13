@@ -76,6 +76,24 @@ World title cards, the welcome splash, the logo and the victory scene were made 
 
 To download them, run `sh tools/fetch-art.sh` from the project folder on any computer with internet access, before building.
 
+## World challenges
+
+Each world opens when the group reaches its **star goal** and finishes its **challenge**:
+
+| World | Stars | Challenge |
+|---|---|---|
+| 1. Forest of Awakening | 500 | Each pair reads 5 chapters of *Jactémonos de Dios* together |
+| 2. Lake of Wisdom | 700 | Each pair gets 1 GA signature and passes 1 EduLMS course |
+| 3. Bridge of Unity | 900 | Each pair preaches to 25 people in total |
+| 4. Mountain of Perseverance | 1,100 | Each pair brings 5 contacts |
+| 5. Garden of Fruits | 1,300 | The whole group brings 3 fruits (approved baptism reports) |
+| 6. City of Promises | 1,500 | A fruit keeps service (at least 1 approved report) |
+
+- **Pairs:** brothers with brothers, sisters with sisters. A member invites someone and the partner accepts. Everyone gets a new partner each world (last world's partner can't be chosen again). Coordinators can form pairs directly, add a third person when the numbers are odd, undo a pair, or excuse someone (sick, traveling) so they don't block the group.
+- **Progress:** either partner logs what they did and when. Coordinators can log or remove entries for any pair. Each member gets +15 XP when their pair finishes (Líder → Reglas).
+- **Board:** everyone sees every pair's status (done, in progress, not started, needs support) and who doesn't have a partner yet, so the group can pray for them. Pairs can ask for support, and anyone can tap "🙏 Oraré".
+- Admins can change the star goals, the challenge texts and the targets in **Líder → Mundos**.
+
 ## How the rules work
 
 - **Points are provisional until a coordinator approves them.** Approving writes to a permanent points ledger. Mistakes are fixed with a reversing entry, never by editing or deleting.

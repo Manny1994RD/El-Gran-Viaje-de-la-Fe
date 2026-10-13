@@ -146,7 +146,7 @@ async function refreshPending() {
 // ---------- routing ----------
 const routes = {
   '': welcome, welcome, login, join, create: () => creator(false), edit: () => creator(true),
-  map: mapView, world: worldView, missions, report, fix: report, me: meView, news, lead, celebrate, tv,
+  map: mapView, world: worldView, challenge: challengeView, gender: genderView, missions, report, fix: report, me: meView, news, lead, celebrate, tv,
 };
 const PUBLIC = new Set(['', 'welcome', 'login', 'join']);
 
@@ -166,10 +166,11 @@ async function router() {
     if (name === 'join') return go('join');
     return go('welcome');
   }
-  if (S.me && !S.character && !['create', 'join'].includes(name)) return go('create');
+  if (S.me && !S.me.gender && name !== 'gender') return go('gender');
+  if (S.me && !S.character && !['create', 'join', 'gender'].includes(name)) return go('create');
   if (S.me && S.character && PUBLIC.has(name)) return go('map');
   const view = routes[name] || mapView;
-  renderNav(name === 'world' ? 'map' : name === 'report' || name === 'fix' ? 'missions' : name);
+  renderNav(name === 'world' || name === 'challenge' ? 'map' : name === 'report' || name === 'fix' ? 'missions' : name);
   app.classList.toggle('wide', name === 'lead');
   window.scrollTo(0, 0);
   app.innerHTML = `<div class="loading">${t('loading')}</div>`;
@@ -243,6 +244,7 @@ async function join({ query }) {
       <div class="panel tight" style="box-shadow:none;background:var(--panel-2)"><h3>${t('consent_title')}</h3><p>${t('consent_body')}</p>
         <label class="check"><input type="checkbox" name="consent"> ${t('consent_check')}</label></div>
       <label class="field"><span>${t('alias')}</span><input type="text" name="alias" required maxlength="20" autocomplete="username"><div class="hint">${t('alias_hint')}</div></label>
+      ${genderField()}
       <label class="field"><span>${t('pin')}</span><input type="password" name="pin" class="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="8" required autocomplete="new-password"><div class="hint">${t('pin_hint')}</div></label>
       <label class="field"><span>${t('pin_confirm')}</span><input type="password" name="pin2" class="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="8" required autocomplete="new-password"></label>
       <button class="btn primary block" type="submit">${t('join')}</button>
@@ -253,7 +255,7 @@ async function join({ query }) {
     const show = (m) => { $('#err').innerHTML = `<div class="error-msg">${esc(m)}</div>`; window.scrollTo(0, 0); };
     if (fd.get('pin') !== fd.get('pin2')) return show(t('pin_mismatch'));
     try {
-      const r = await api('POST', '/auth/redeem', { code: fd.get('code'), alias: fd.get('alias'), pin: fd.get('pin'), consent: !!fd.get('consent'), lang: getLang() });
+      const r = await api('POST', '/auth/redeem', { code: fd.get('code'), alias: fd.get('alias'), pin: fd.get('pin'), consent: !!fd.get('consent'), gender: fd.get('gender'), lang: getLang() });
       S.me = r.me;
       await loadBootstrap();
       go('create');
@@ -378,11 +380,14 @@ async function mapView() {
     head = `<div class="panel">
       ${worldArt(w, 'world-art banner')}
       <div class="panel-title"><div><div class="hint" style="margin:0;font-weight:800">${t('current_world')} ${w.ord}/6</div><h2>${esc(tr(w, 'name'))}</h2></div>${worldStatusPill(w.status)}</div>
+      ${active.challenge ? `<p style="font-weight:700;margin:4px 0 0">🎯 ${esc(chText(active.challenge))}</p>` : ''}
       ${w.star_target ? bar('⭐ ' + t('stars'), active.stars, w.star_target, 'gold') : ''}
-      ${bar('🔑 ' + esc(tr(w, 'obstacle')), active.tag_count, w.tag_target)}
-      ${w.distinct_min ? bar('👥 ' + t('people'), active.distinct, w.distinct_min, 'blue') : ''}
+      ${active.challenge ? challengeBar(active.challenge) : bar('🔑 ' + esc(tr(w, 'obstacle')), active.tag_count, w.tag_target)}
+      ${!active.challenge && w.distinct_min ? bar('👥 ' + t('people'), active.distinct, w.distinct_min, 'blue') : ''}
       ${active.eligible ? `<p style="margin-top:12px;font-weight:800;color:var(--green-d)">✨ ${t('eligible')}</p>` : ''}
-      <div class="btn-row" style="margin-top:14px"><a class="btn" href="#/world/${w.id}">ℹ️ ${esc(tr(w, 'obstacle'))}</a><a class="btn primary" href="#/missions">${t('see_missions')}</a></div>
+      <div class="btn-row" style="margin-top:14px">${active.challenge
+        ? `<a class="btn gold" href="#/challenge/${w.id}">🎯 ${t('see_challenge')}</a>`
+        : `<a class="btn" href="#/world/${w.id}">ℹ️ ${esc(tr(w, 'obstacle'))}</a>`}<a class="btn primary" href="#/missions">${t('see_missions')}</a></div>
     </div>`;
   }
   const keys = worlds.map((p) => `<div class="key-slot ${p.world.status === 'unlocked' ? 'got' : ''}" title="${esc(tr(p.world, 'key'))}">${p.world.status === 'unlocked' ? '🔑' : ''}</div>`).join('');
@@ -405,7 +410,17 @@ async function worldView({ args }) {
         <div><h1 style="margin:0">${esc(tr(w, 'name'))}</h1>${worldStatusPill(w.status)}</div></div>
       <p class="story" style="margin-top:12px">${esc(tr(w, 'story'))}</p>
     </div>
-    <div class="panel"><h2>🚧 ${esc(tr(w, 'obstacle'))}</h2><p>${esc(tr(w, 'rule'))}</p>
+    ${p.challenge ? `<div class="panel"><h2>🎯 ${t('challenge')}</h2><p style="font-weight:700">${esc(chText(p.challenge))}</p>
+      ${w.star_target ? bar('⭐ ' + t('stars'), p.stars, w.star_target, 'gold') : ''}
+      ${challengeBar(p.challenge)}
+      <h3 style="margin-top:16px">${t('requirements')}</h3>
+      <ul class="req-list">
+        ${w.star_target ? tick(p.checks.stars, '⭐ ' + t('stars')) : ''}
+        ${tick(p.checks.challenge, '🎯 ' + t(p.challenge.type === 'pair' ? 'pair_challenge' : 'group_challenge'))}
+        ${w.ord > 1 ? tick(p.checks.previous, t('prev_world')) : ''}
+      </ul>
+      ${w.status !== 'locked' ? `<a class="btn gold block" style="margin:12px 0" href="#/challenge/${w.id}">🎯 ${t('see_challenge')}</a>` : ''}`
+    : `<div class="panel"><h2>🚧 ${esc(tr(w, 'obstacle'))}</h2><p>${esc(tr(w, 'rule'))}</p>
       ${w.star_target ? bar('⭐ ' + t('stars'), p.stars, w.star_target, 'gold') : ''}
       ${bar('🔑 ' + t('obstacle'), p.tag_count, w.tag_target)}
       ${paths}
@@ -416,7 +431,7 @@ async function worldView({ args }) {
         ${tick(p.checks.obstacle, '🔑 ' + esc(tr(w, 'obstacle')))}
         ${w.distinct_min ? tick(p.checks.distinct, '👥 ' + t('people')) : ''}
         ${w.ord > 1 ? tick(p.checks.previous, t('prev_world')) : ''}
-      </ul>
+      </ul>`}
       ${p.pending_claims ? `<p class="hint">⏳ ${p.pending_claims} ${t('pending_claims')}</p>` : ''}
       ${p.eligible ? `<p style="font-weight:800;color:var(--green-d)">✨ ${t('eligible')}</p>` : ''}
       ${p.eligible && isCoord() ? `<button class="btn gold block" id="unlock">🔑 ${t('confirm_unlock')}</button>` : ''}
@@ -433,6 +448,212 @@ async function worldView({ args }) {
       go(r.next ? 'map' : 'celebrate');
     } catch (err) { toast(errText(err), true); }
   });
+}
+
+// ---------- world challenge (pairs / group fruit) ----------
+const chText = (ch) => (getLang() === 'en' ? ch.en || ch.es : ch.es) || '';
+const itemLabel = (it) => (getLang() === 'en' ? it.en : it.es);
+function challengeBar(ch) {
+  if (ch.type === 'pair') return bar('👥 ' + t('members_done'), ch.done, ch.members, 'blue');
+  return bar((ch.type === 'keeping' ? '🌱 ' + t('keeping') : '🍇 ' + t('fruits')), ch.count, ch.target, 'blue');
+}
+const nowLocal = () => { const d = new Date(); return localDate(d) + 'T' + d.toTimeString().slice(0, 5); };
+
+function genderField(current = '') {
+  return `<div class="field"><span style="font-weight:800;display:block;margin-bottom:6px">${t('gender')}</span><div class="gender-pick">
+    ${['brother', 'sister'].map((g) => `<label class="gender-opt"><input type="radio" name="gender" value="${g}" required ${current === g ? 'checked' : ''}><span>${g === 'brother' ? '👨' : '👩'} ${t(g)}</span></label>`).join('')}
+  </div></div>`;
+}
+
+async function genderView() {
+  if (S.me.gender) return go('map');
+  app.innerHTML = `<div class="panel"><h2>${t('gender_title')}</h2><p>${t('gender_body')}</p><form id="gf">${genderField()}
+    <button class="btn primary block">${t('save')}</button></form></div>`;
+  $('#gf').onsubmit = async (e) => {
+    e.preventDefault();
+    const g = new FormData(e.target).get('gender');
+    try {
+      await api('POST', '/me/gender', { gender: g });
+      S.me.gender = g;
+      go(S.character ? 'map' : 'create');
+    } catch (err) { toast(errText(err), true); }
+  };
+}
+
+// Small form to log progress for one pair; used for my pair and by coordinators.
+function progressFormHTML(ch, pairId) {
+  return `<form class="progress-form" data-pair="${pairId}">
+    ${ch.items.length > 1 ? `<div class="chips">${ch.items.map((it, i) => `<label class="chip"><input type="radio" name="item" value="${it.key}" ${i === 0 ? 'checked' : ''} style="display:none"> ${esc(itemLabel(it))}</label>`).join('')}</div>`
+      : `<input type="hidden" name="item" value="${ch.items[0].key}">`}
+    <div class="stepper" style="margin:10px 0"><button type="button" data-step="-1" aria-label="-">−</button><output name="amount">1</output><button type="button" data-step="1" aria-label="+">+</button>
+      <span class="hint">${esc(itemLabel(ch.items[0]))}</span></div>
+    <label class="field"><span>${t('when_done')}</span><input type="datetime-local" name="done_at" value="${nowLocal()}" max="${nowLocal()}"></label>
+    <button class="btn green block">✔ ${t('save_progress')}</button></form>`;
+}
+
+function wireProgressForms(root, ch, onDone) {
+  root.addEventListener('click', (e) => {
+    const step = e.target.closest('[data-step]');
+    if (step) {
+      const out = $('output[name=amount]', step.closest('form'));
+      out.textContent = Math.max(1, Math.min(200, Number(out.textContent) + Number(step.dataset.step)));
+    }
+    const chip = e.target.closest('.progress-form .chip');
+    if (chip) {
+      const f = chip.closest('form');
+      $$('.chip', f).forEach((c) => c.classList.toggle('on', c === chip));
+      const it = ch.items.find((x) => x.key === $('input', chip).value);
+      $('.stepper .hint', f).textContent = itemLabel(it);
+    }
+  });
+  $$('.progress-form', root).forEach((f) => { $('.chip', f)?.classList.add('on'); });
+  root.addEventListener('submit', async (e) => {
+    const f = e.target.closest('.progress-form');
+    if (!f) return;
+    e.preventDefault();
+    const btn = $('button.green', f);
+    btn.disabled = true;
+    try {
+      const r = await api('POST', `/pairs/${f.dataset.pair}/progress`, {
+        item: (f.querySelector('input[name=item]:checked') || f.querySelector('input[name=item]')).value,
+        amount: Number($('output[name=amount]', f).textContent), done_at: f.elements.done_at.value,
+      });
+      if (r.completed) { confetti(); toast('🎉 ' + t('st_done')); } else toast(t('saved'));
+      onDone();
+    } catch (err) { toast(errText(err), true); btn.disabled = false; }
+  });
+}
+
+async function challengeView({ args }) {
+  let worldId = args[0];
+  if (!worldId) {
+    const ws = await api('GET', '/worlds');
+    worldId = (ws.find((p) => p.world.status === 'active') || ws[ws.length - 1]).world.id;
+  }
+  const [b, members] = await Promise.all([api('GET', '/challenge/' + worldId), api('GET', '/members')]);
+  const byId = Object.fromEntries(members.map((m) => [m.id, m]));
+  const face = (id) => (byId[id] ? avatarSVG({ ...byId[id].look, show: {} }, { classId: byId[id].class_id, crop: 'head' }) : '');
+  const name = (id) => esc(byId[id]?.alias || '—');
+  const w = b.world;
+  const ch = b.challenge;
+  const live = w.status === 'active';
+  const reload = () => challengeView({ args: [worldId] });
+
+  let h = `<div class="panel">${worldArt(w, 'world-art banner')}
+    <div class="hint" style="margin:0;font-weight:800">${esc(tr(w, 'name'))} · ${worldStatusPill(w.status)}</div>
+    <h1 style="margin:4px 0">🎯 ${t(ch.type === 'pair' ? 'pair_challenge' : 'group_challenge')}</h1>
+    <p style="font-weight:700;font-size:1.05rem">${esc(chText(ch))}</p>${challengeBar(ch)}</div>`;
+
+  if (ch.type !== 'pair') {
+    const def = ch.type === 'keeping' ? 'PRE05' : 'PRE04';
+    h += `<div class="panel"><h2>${t('fruits_list')}</h2><p class="hint">${t('fruit_hint')}</p>
+      ${b.fruits.length ? b.fruits.map((f) => `<div class="reward-row"><span class="code">🌱 ${esc(f.token || '—')}</span><div class="grow">${esc(f.alias)} · ${fmtDate(f.performed_at)}</div>${statusPill(f.status)}</div>`).join('') : '<p>—</p>'}
+      ${live ? `<a class="btn primary block" style="margin-top:12px" href="#/report/${def}">${t(ch.type === 'keeping' ? 'report_keeping' : 'report_fruit')}</a>` : ''}</div>`;
+    app.innerHTML = h;
+    return;
+  }
+
+  const statusOf = (p) => (p.complete ? 'done' : p.needs_support ? 'support' : p.started ? 'progress' : 'none');
+  const pill = (st) => `<span class="status-pill ${{ done: 'approved', support: 'needs_changes', progress: 'pending', none: '' }[st]}">${{ done: '✅', support: '🙋', progress: '🟡', none: '⏳' }[st]} ${t('st_' + st)}</span>`;
+  const progText = (p) => ch.items.map((it) => `${esc(itemLabel(it))}: <b>${Math.min(p.progress[it.key] || 0, 9999)}/${it.target}</b>`).join(' · ');
+  const faces = (ids) => `<span class="pair-faces">${ids.map((id) => `<span>${face(id)}</span>`).join('')}</span>`;
+  const my = b.my;
+  const myPair = b.pairs.find((p) => p.mine);
+
+  // My pair / choosing a partner
+  if (my.excused) {
+    h += `<div class="panel"><p style="margin:0">${t('excused_you')}</p></div>`;
+  } else if (myPair) {
+    h += `<div class="panel"><div class="panel-title"><h2>${t('my_pair')}</h2>${pill(statusOf(myPair))}</div>
+      <div class="pair-row">${faces(myPair.members)}<b>${myPair.members.map(name).join(' & ')}</b></div>
+      ${ch.items.map((it) => bar(esc(itemLabel(it)), myPair.progress[it.key] || 0, it.target)).join('')}
+      ${live && !myPair.complete ? `<h3 style="margin-top:16px">${t('log_progress')}</h3>${progressFormHTML(ch, myPair.id)}
+        <button class="btn small ${myPair.needs_support ? '' : 'blue'}" style="margin-top:10px" id="support">${myPair.needs_support ? t('support_off') : t('need_support')}</button>` : ''}
+      ${myPair.entries?.length ? `<h3 style="margin-top:16px">${t('progress_log')}</h3>${myPair.entries.map((e) => `<div class="reward-row"><div class="grow"><b>+${e.amount}</b> ${esc(itemLabel(ch.items.find((it) => it.key === e.item_key) || { es: e.item_key, en: e.item_key }))}
+        <div class="hint" style="margin:0">${fmtDate(e.done_at.slice(0, 10))} ${esc(e.done_at.slice(11, 16))} · ${esc(e.actor)}</div></div>
+        ${live && (e.actor_id === S.me.id || isCoord()) ? `<button class="link-btn" data-remove="${e.id}">${t('remove')}</button>` : ''}</div>`).join('')}` : ''}</div>`;
+  } else if (live) {
+    h += `<div class="panel"><h2>${t('choose_partner')}</h2><p class="hint">${t('choose_hint')}</p>
+      ${my.incoming.map((i) => `<div class="claim"><div class="pair-row">${faces([i.from])}<div><b>${name(i.from)}</b> ${t('invited_you')}</div></div>
+        <div class="btn-row" style="margin-top:8px"><button class="btn small green" data-respond="${i.id}" data-accept="1">✔ ${t('accept')}</button><button class="btn small" data-respond="${i.id}" data-accept="0">${t('decline')}</button></div></div>`).join('')}
+      ${my.outgoing.map((o) => `<div class="claim"><div class="pair-row">${faces([o.to])}<div>⏳ ${t('waiting_for')} <b>${name(o.to)}</b></div></div>
+        <button class="link-btn" data-respond="${o.id}" data-accept="0">${t('cancel_invite')}</button></div>`).join('')}
+      ${my.candidates.length ? `<div class="people-grid">${my.candidates.map((id) => `<button type="button" class="person" data-invite="${id}"><span class="face">${face(id)}</span><span>${name(id)}</span></button>`).join('')}</div>`
+        : `<p>${t('no_candidates')}</p>`}</div>`;
+  }
+
+  // Board for everyone
+  const order = { support: 0, none: 1, progress: 2, done: 3 };
+  const sorted = [...b.pairs].sort((x, y) => order[statusOf(x)] - order[statusOf(y)]);
+  h += `<div class="panel"><h2>${t('board')}</h2><p class="hint">${t('board_hint')}</p>
+    ${sorted.map((p) => `<div class="claim board-pair" data-pid="${p.id}"><div class="top"><div class="pair-row">${faces(p.members)}<b>${p.members.map(name).join(' & ')}</b></div>${pill(statusOf(p))}</div>
+      <div class="sub" style="margin-top:4px">${progText(p)}</div>
+      <div class="btn-row" style="margin-top:8px;align-items:center">
+        ${!p.complete ? `<button class="btn small ${p.i_pray ? 'gold' : ''}" data-pray="${p.id}">${p.i_pray ? t('praying') : t('pray')}${p.prayers ? ` · ${p.prayers}` : ''}</button>` : ''}
+        ${isCoord() && live ? `<button class="btn small" data-logfor="${p.id}" title="${t('log_for')}" aria-label="${t('log_for')}">📝</button>${p.members.length < 3 ? `<button class="btn small" data-third="${p.id}" title="${t('add_third')}" aria-label="${t('add_third')}">➕ 3</button>` : ''}<button class="btn small primary" data-dissolve="${p.id}" title="${t('dissolve')}" aria-label="${t('dissolve')}">✖</button>` : ''}
+      </div></div>`).join('') || '<p>—</p>'}
+    ${b.unpaired.length ? `<h3 style="margin-top:16px">${t('unpaired')} (${b.unpaired.length})</h3><div class="unpaired">${b.unpaired.map((id) => `<span class="chip" style="cursor:default">${name(id)}${isCoord() && live ? ` <button class="link-btn" data-excuse="${id}">${t('excuse')}</button>` : ''}</span>`).join('')}</div>` : ''}
+    ${b.excused.length ? `<h3 style="margin-top:16px">${t('excused')}</h3><div class="unpaired">${b.excused.map((x) => `<span class="chip" style="cursor:default">${esc(x.alias)}${x.reason ? ` · ${esc(x.reason)}` : ''}${isCoord() && live ? ` <button class="link-btn" data-unexcuse="${x.user_id}">${t('unexcuse')}</button>` : ''}</span>`).join('')}</div>` : ''}
+  </div>`;
+
+  // Coordinator: make a pair from the people without one
+  if (isCoord() && live && b.unpaired_detail?.length >= 2) {
+    h += `<div class="panel"><h2>${t('coord_tools')}</h2><h3>${t('make_pair')}</h3><p class="hint">${t('make_pair_hint')}</p>
+      <div class="people-grid" id="mk">${b.unpaired_detail.map((u) => `<button type="button" class="person" data-pick="${u.id}"><span class="face">${face(u.id)}</span><span>${name(u.id)}</span><span class="hint" style="margin:0">${u.gender ? t(u.gender) : '—'}</span></button>`).join('')}</div>
+      <button class="btn green" style="margin-top:10px" id="mkgo">${t('make_pair')}</button></div>`;
+  }
+  app.innerHTML = `<div id="chv">${h}</div>`;
+  const root = $('#chv');
+  wireProgressForms(root, ch, reload);
+  const call = async (method, path, body, msg) => {
+    try { await api(method, path, body); if (msg) toast(msg); reload(); } catch (err) { toast(errText(err), true); }
+  };
+  const picked = new Set();
+  root.onclick = async (e) => {
+    const el = (sel) => e.target.closest(sel);
+    if (el('#support')) return call('POST', `/pairs/${myPair.id}/support`, { on: !myPair.needs_support });
+    if (el('[data-remove]')) { if (await ask(t('remove') + '?', { danger: true })) call('DELETE', '/progress/' + el('[data-remove]').dataset.remove, {}); return; }
+    if (el('[data-respond]')) { const r = el('[data-respond]'); return call('POST', `/pairs/${r.dataset.respond}/respond`, { accept: r.dataset.accept === '1' }); }
+    if (el('[data-invite]')) {
+      const id = Number(el('[data-invite]').dataset.invite);
+      if (await ask(`${t('invite_partner')}: ${byId[id]?.alias}?`, { okLabel: t('invite_partner') })) call('POST', `/challenge/${worldId}/request`, { partner_id: id }, t('saved'));
+      return;
+    }
+    if (el('[data-pray]')) return call('POST', `/pairs/${el('[data-pray]').dataset.pray}/pray`, {});
+    if (el('[data-dissolve]')) { if (await ask(t('dissolve') + '?', { danger: true })) call('DELETE', '/pairs/' + el('[data-dissolve]').dataset.dissolve, {}); return; }
+    if (el('[data-excuse]')) {
+      const reason = await ask(t('excuse'), { input: true, placeholder: t('reason_ph'), okLabel: t('excuse') });
+      if (reason) call('POST', `/challenge/${worldId}/excuse`, { user_id: Number(el('[data-excuse]').dataset.excuse), excused: true, reason });
+      return;
+    }
+    if (el('[data-unexcuse]')) return call('POST', `/challenge/${worldId}/excuse`, { user_id: Number(el('[data-unexcuse]').dataset.unexcuse), excused: false });
+    if (el('[data-pick]')) {
+      const b2 = el('[data-pick]'); const id = Number(b2.dataset.pick);
+      picked.has(id) ? picked.delete(id) : picked.add(id);
+      b2.classList.toggle('on', picked.has(id));
+      return;
+    }
+    if (el('#mkgo')) return call('POST', `/challenge/${worldId}/pairs`, { ids: [...picked] }, t('saved'));
+    if (el('[data-third]')) {
+      const pid = el('[data-third]').dataset.third;
+      const m = modal(`<h3>${t('add_third')}</h3><div class="people-grid">${b.unpaired.map((id) => `<button type="button" class="person" data-add="${id}"><span class="face">${face(id)}</span><span>${name(id)}</span></button>`).join('') || '<p>—</p>'}</div>
+        <button class="btn block" style="margin-top:10px" id="mclose">${t('cancel')}</button>`);
+      $('#mclose', m.el).onclick = m.close;
+      m.el.onclick = (ev) => { const a = ev.target.closest('[data-add]'); if (a) { m.close(); call('POST', `/pairs/${pid}/add`, { user_id: Number(a.dataset.add) }, t('saved')); } };
+      return;
+    }
+    if (el('[data-logfor]')) {
+      const pid = el('[data-logfor]').dataset.logfor;
+      const p = b.pairs.find((x) => String(x.id) === pid);
+      const m = modal(`<h3>${t('log_for')}</h3><p><b>${p.members.map(name).join(' & ')}</b></p><div class="sub" style="margin-bottom:8px">${progText(p)}</div>
+        ${progressFormHTML(ch, pid)}
+        ${p.entries?.length ? `<h3 style="margin-top:12px">${t('progress_log')}</h3>${p.entries.map((e2) => `<div class="reward-row"><div class="grow">+${e2.amount} ${esc(itemLabel(ch.items.find((it) => it.key === e2.item_key) || { es: e2.item_key, en: e2.item_key }))} · ${esc(e2.actor)}</div><button class="link-btn" data-mremove="${e2.id}">${t('remove')}</button></div>`).join('')}` : ''}
+        <button class="btn block" style="margin-top:10px" id="mclose">${t('cancel')}</button>`);
+      $('#mclose', m.el).onclick = m.close;
+      wireProgressForms(m.el, ch, () => { m.close(); reload(); });
+      m.el.addEventListener('click', (ev) => { const r = ev.target.closest('[data-mremove]'); if (r) { m.close(); call('DELETE', '/progress/' + r.dataset.mremove, {}); } });
+    }
+  };
 }
 
 // ---------- missions ----------
@@ -464,7 +685,9 @@ async function missions({ query }) {
         <span class="pts">+${d.points}</span></button>`;
     }).join('');
   };
-  app.innerHTML = `<h1>${t('nav_missions')}</h1><div class="chips" id="chips"></div><div class="mission-list" id="list"></div>`;
+  const activeP = worlds.find((p) => p.world.status === 'active');
+  const banner = activeP?.challenge ? `<a class="panel tight challenge-banner" href="#/challenge/${activeP.world.id}">🎯 <span><b>${t('challenge')}:</b> ${esc(chText(activeP.challenge))}</span><span class="chev">›</span></a>` : '';
+  app.innerHTML = `<h1>${t('nav_missions')}</h1>${banner}<div class="chips" id="chips"></div><div class="mission-list" id="list"></div>`;
   $('#chips').onclick = (e) => { const b = e.target.closest('[data-cat]'); if (b) { cat = b.dataset.cat; draw(); } };
   $('#list').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b && !b.disabled) go('report/' + b.dataset.id); };
   draw();
@@ -729,8 +952,9 @@ async function leadPanel(box) {
   const active = worlds.find((p) => p.world.status === 'active');
   box.innerHTML = `${active ? `<div class="panel"><h2>${esc(tr(active.world, 'name'))}</h2>
       ${active.world.star_target ? bar('⭐ ' + t('stars'), active.stars, active.world.star_target, 'gold') : ''}
-      ${bar('🔑 ' + esc(tr(active.world, 'obstacle')), active.tag_count, active.world.tag_target)}
-      ${active.world.distinct_min ? bar('👥 ' + t('people'), active.distinct, active.world.distinct_min, 'blue') : ''}
+      ${active.challenge ? challengeBar(active.challenge) : bar('🔑 ' + esc(tr(active.world, 'obstacle')), active.tag_count, active.world.tag_target)}
+      ${!active.challenge && active.world.distinct_min ? bar('👥 ' + t('people'), active.distinct, active.world.distinct_min, 'blue') : ''}
+      ${active.challenge ? `<a class="btn gold block" style="margin-top:12px" href="#/challenge/${active.world.id}">🎯 ${t('board')}</a>` : ''}
       ${active.pending_claims ? `<p class="hint">⏳ ${active.pending_claims} ${t('pending_claims')}</p>` : ''}
       <a class="btn ${active.eligible ? 'gold' : ''} block" style="margin-top:12px" href="#/world/${active.world.id}">${active.eligible ? '🔑 ' + t('confirm_unlock') : 'ℹ️ ' + t('requirements')}</a></div>` : ''}
     <div class="panel"><h2>${t('group_stats')}</h2><div class="stat-grid">
@@ -833,18 +1057,30 @@ async function leadMissions(box) {
 
 async function leadWorlds(box) {
   const d = await api('GET', '/admin/settings');
-  box.innerHTML = `<div class="panel"><h2>${t('lead_worlds')}</h2><p class="hint">${t('world_targets_hint')}</p>${d.worlds.map((w) => `<div class="claim" data-wid="${w.id}">
+  const num = (name, label, value, off) => `<label class="field" style="margin:0"><span style="font-size:.8rem">${label}</span><input type="number" name="${name}" value="${value}" min="0" ${off ? 'disabled' : ''}></label>`;
+  box.innerHTML = `<div class="panel"><h2>${t('lead_worlds')}</h2><p class="hint">${t('world_targets_hint')}</p>${d.worlds.map((w) => {
+    const off = w.status === 'unlocked';
+    const cfg = w.challenge_json ? JSON.parse(w.challenge_json) : null;
+    const fields = w.challenge_type
+      ? [num('star_target', t('star_target'), w.star_target, off),
+        ...(cfg.items ? cfg.items.map((it) => num('item:' + it.key, esc(getLang() === 'en' ? it.en : it.es), it.target, off)) : [num('challenge_target', t('goal'), cfg.target, off)])]
+      : [num('star_target', t('star_target'), w.star_target, off), num('tag_target', t('tag_target'), w.tag_target, off), num('distinct_min', t('distinct_min'), w.distinct_min, off)];
+    return `<div class="claim" data-wid="${w.id}">
     <div class="top"><b>${w.ord}. ${esc(tr(w, 'name'))}</b>${worldStatusPill(w.status)}</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">
-      <label class="field" style="margin:0"><span style="font-size:.8rem">${t('star_target')}</span><input type="number" name="star_target" value="${w.star_target}" ${w.status === 'unlocked' ? 'disabled' : ''}></label>
-      <label class="field" style="margin:0"><span style="font-size:.8rem">${t('tag_target')}</span><input type="number" name="tag_target" value="${w.tag_target}" ${w.status === 'unlocked' ? 'disabled' : ''}></label>
-      <label class="field" style="margin:0"><span style="font-size:.8rem">${t('distinct_min')}</span><input type="number" name="distinct_min" value="${w.distinct_min}" ${w.status === 'unlocked' ? 'disabled' : ''}></label></div>
-    ${w.status !== 'unlocked' ? `<button class="btn small green" style="margin-top:8px" data-save>${t('save')}</button>` : ''}</div>`).join('')}</div>`;
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:8px">${fields.join('')}</div>
+    ${w.challenge_type ? `<label class="field" style="margin:8px 0 0"><span style="font-size:.8rem">${t('challenge_text')} (ES)</span><textarea name="challenge_es" ${off ? 'disabled' : ''} style="min-height:56px">${esc(w.challenge_es)}</textarea></label>
+      <label class="field" style="margin:8px 0 0"><span style="font-size:.8rem">${t('challenge_text')} (EN)</span><textarea name="challenge_en" ${off ? 'disabled' : ''} style="min-height:56px">${esc(w.challenge_en)}</textarea></label>` : ''}
+    ${off ? '' : `<button class="btn small green" style="margin-top:8px" data-save>${t('save')}</button>`}</div>`;
+  }).join('')}</div>`;
   box.onclick = async (e) => {
     const b = e.target.closest('[data-save]');
     if (!b) return;
     const row = b.closest('[data-wid]');
-    const body = Object.fromEntries(['star_target', 'tag_target', 'distinct_min'].map((k) => [k, $(`[name=${k}]`, row).value]));
+    const body = { items: {} };
+    for (const el of $$('input, textarea', row)) {
+      if (el.name.startsWith('item:')) body.items[el.name.slice(5)] = el.value;
+      else body[el.name] = el.value;
+    }
     try { await api('PUT', '/admin/worlds/' + row.dataset.wid, body); toast(t('saved')); } catch (err) { toast(errText(err), true); }
   };
 }
@@ -867,12 +1103,13 @@ async function leadUsers(box) {
   box.innerHTML = `<div class="panel"><h2>${t('lead_users')} (${users.length})</h2><div class="table-scroll"><table class="simple"><tbody>
     ${users.map((u) => `<tr data-uid="${u.id}"><td><b>${esc(u.alias)}</b><div class="sub">${esc(tr(classById(u.class_id), 'name'))} · ${u.xp} XP</div></td>
       <td><select name="role" style="min-height:38px">${['member', 'coordinator', 'admin'].map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${t('roles.' + r)}</option>`).join('')}</select></td>
+      <td><select name="gender" style="min-height:38px"><option value="" ${u.gender ? '' : 'selected'} disabled>—</option>${['brother', 'sister'].map((g) => `<option value="${g}" ${u.gender === g ? 'selected' : ''}>${t(g)}</option>`).join('')}</select></td>
       <td><button class="btn small ${u.status === 'active' ? '' : 'green'}" data-status="${u.status === 'active' ? 'disabled' : 'active'}">${u.status === 'active' ? t('disable') : t('enable')}</button></td>
       <td><button class="btn small" data-pin>🔑 ${t('reset_pin')}</button></td></tr>`).join('')}</tbody></table></div></div>`;
   box.onchange = async (e) => {
-    if (e.target.name !== 'role') return;
+    if (!['role', 'gender'].includes(e.target.name)) return;
     const id = e.target.closest('[data-uid]').dataset.uid;
-    try { await api('PUT', '/admin/users/' + id, { role: e.target.value }); toast(t('saved')); } catch (err) { toast(errText(err), true); leadUsers(box); }
+    try { await api('PUT', '/admin/users/' + id, { [e.target.name]: e.target.value }); toast(t('saved')); } catch (err) { toast(errText(err), true); leadUsers(box); }
   };
   box.onclick = async (e) => {
     const row = e.target.closest('[data-uid]');
@@ -959,8 +1196,8 @@ async function tv() {
       <div class="tv-side"><div class="panel"><div class="hint" style="font-size:1.2rem;font-weight:800;margin:0">${esc(S.settings.season_name || t('app_name'))}</div>
         ${w ? `<h1>${w.ord}. ${esc(tr(w, 'name'))}</h1>
         ${w.star_target ? bar('⭐ ' + t('stars'), active.stars, w.star_target, 'gold') : ''}
-        ${bar('🔑 ' + esc(tr(w, 'obstacle')), active.tag_count, w.tag_target)}
-        ${w.distinct_min ? bar('👥 ' + t('people'), active.distinct, w.distinct_min, 'blue') : ''}` : `<h1>🎉 ${t('victory')}</h1>`}</div>
+        ${active.challenge ? `<p style="font-size:1.3rem;font-weight:700;margin:8px 0">🎯 ${esc(chText(active.challenge))}</p>${challengeBar(active.challenge)}`
+          : `${bar('🔑 ' + esc(tr(w, 'obstacle')), active.tag_count, w.tag_target)}${w.distinct_min ? bar('👥 ' + t('people'), active.distinct, w.distinct_min, 'blue') : ''}`}` : `<h1>🎉 ${t('victory')}</h1>`}</div>
         <div class="panel"><div class="stat-grid"><div class="stat"><b>${g.members}</b><span>${t('members')}</span></div><div class="stat"><b>${g.missions}</b><span>${t('missions_done')}</span></div>
           <div class="stat"><b>${g.stars}</b><span>${t('total_stars')}</span></div><div class="stat"><b>${g.keys}/6</b><span>${t('keys')}</span></div></div></div>
         <div class="panel" style="flex:1;overflow:hidden"><div class="tv-party">${members.slice(0, 40).map((m) => avatarSVG(m.look, { classId: m.class_id, frame: false })).join('')}</div></div>

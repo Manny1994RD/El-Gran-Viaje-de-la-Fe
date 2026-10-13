@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { SETTINGS, WORLDS, MISSIONS, CLASSES } from './catalog.js';
+import { SETTINGS, WORLDS, MISSIONS, CLASSES, CHALLENGES } from './catalog.js';
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -67,6 +67,21 @@ CREATE TABLE IF NOT EXISTS rewards (
   at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (source_id, reward_type, user_id));
 CREATE TABLE IF NOT EXISTS news (
   id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT, card_id TEXT, actor_id INTEGER, at TEXT NOT NULL DEFAULT (datetime('now')));
+-- Pair challenges: one pair per member per world; user_c makes a trio.
+CREATE TABLE IF NOT EXISTS pairs (
+  id INTEGER PRIMARY KEY, world_id TEXT NOT NULL REFERENCES worlds(id), user_a INTEGER NOT NULL REFERENCES users(id),
+  user_b INTEGER NOT NULL REFERENCES users(id), user_c INTEGER REFERENCES users(id),
+  status TEXT NOT NULL CHECK (status IN ('pending','active','cancelled')), needs_support INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT);
+CREATE INDEX IF NOT EXISTS pairs_world ON pairs(world_id, status);
+CREATE TABLE IF NOT EXISTS pair_progress (
+  id INTEGER PRIMARY KEY, pair_id INTEGER NOT NULL REFERENCES pairs(id), item_key TEXT NOT NULL, amount INTEGER NOT NULL,
+  done_at TEXT NOT NULL, actor_id INTEGER NOT NULL, removed_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS pair_prayers (
+  pair_id INTEGER NOT NULL REFERENCES pairs(id), user_id INTEGER NOT NULL REFERENCES users(id), UNIQUE (pair_id, user_id));
+CREATE TABLE IF NOT EXISTS excusals (
+  world_id TEXT NOT NULL, user_id INTEGER NOT NULL, actor_id INTEGER, reason TEXT, at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (world_id, user_id));
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY, actor_id INTEGER, entity TEXT NOT NULL, entity_id TEXT, action TEXT NOT NULL,
   old_json TEXT, new_json TEXT, at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -78,6 +93,7 @@ export function openDb(file) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
   seed(db);
+  migrate(db);
   return db;
 }
 
@@ -104,6 +120,26 @@ function seed(db) {
     min_participants,contact,confirm,exempt_cap,reward_scope) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (const d of MISSIONS) insDef.run(d.id, d.category, d.kind, d.name_es, d.name_en, d.freq_es, d.freq_en, d.points, d.tags.join(','),
     d.daily_cap, d.min_participants, d.contact, d.confirm, d.exempt_cap, d.reward_scope ?? null);
+}
+
+const hasColumn = (db, table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+
+// Upgrades an existing database in place; runs once per version.
+function migrate(db) {
+  const version = Number(db.prepare("SELECT value FROM settings WHERE key = 'schema_version'").get()?.value || 1);
+  if (version < 2) {
+    if (!hasColumn(db, 'users', 'gender')) db.exec("ALTER TABLE users ADD COLUMN gender TEXT CHECK (gender IN ('brother','sister'))");
+    for (const col of ['challenge_type', 'challenge_json', 'challenge_es', 'challenge_en']) {
+      if (!hasColumn(db, 'worlds', col)) db.exec(`ALTER TABLE worlds ADD COLUMN ${col} TEXT`);
+    }
+    const upd = db.prepare(`UPDATE worlds SET challenge_type = ?, challenge_json = ?, challenge_es = ?, challenge_en = ?,
+        star_target = CASE WHEN status = 'unlocked' THEN star_target ELSE ? END WHERE id = ?`);
+    for (const [id, c] of Object.entries(CHALLENGES)) {
+      const cfg = c.type === 'pair' ? { items: c.items } : { target: c.target };
+      upd.run(c.type, JSON.stringify(cfg), c.es, c.en, c.stars, id);
+    }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')").run();
+  }
 }
 
 export function getSettings(db) {
